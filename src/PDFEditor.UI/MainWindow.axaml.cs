@@ -12,6 +12,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using Avalonia.Layout;
 using Avalonia.VisualTree;
 using NLog;
 using PDFEditor.Core.Services;
@@ -771,6 +772,235 @@ public partial class MainWindow : Window
             }
         }
         catch (Exception ex) { Log.Error(ex, "Export HTML failed"); }
+    }
+
+    private async void OnExportDocxClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab is not { IsDocumentLoaded: true, PdfBytes: not null }) return;
+        try
+        {
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Export to DOCX",
+                DefaultExtension = "docx",
+                FileTypeChoices = new[] { new FilePickerFileType("Word Document") { Patterns = new[] { "*.docx" } } },
+                SuggestedFileName = IOPath.GetFileNameWithoutExtension(Tab.FilePath ?? "document") + ".docx"
+            });
+            if (file != null)
+            {
+                var path = file.TryGetLocalPath();
+                if (!string.IsNullOrEmpty(path))
+                {
+                    Tab.StatusText = "Exporting to DOCX...";
+                    var provider = new PDFEditor.Core.Services.Export.DocxExportProvider();
+                    var options = new PDFEditor.Core.Abstractions.ExportOptions
+                    {
+                        BaseFileName = IOPath.GetFileNameWithoutExtension(Tab.FilePath ?? "document"),
+                        OutputFormat = "DOCX"
+                    };
+                    var result = await provider.ExportAsync(Tab.PdfBytes, options);
+                    if (result.Success)
+                    {
+                        File.WriteAllBytes(path, result.Data);
+                        Tab.StatusText = $"Exported to DOCX: {IOPath.GetFileName(path)}";
+                    }
+                    else
+                    {
+                        Tab.StatusText = $"Export failed: {result.ErrorMessage}";
+                    }
+                }
+            }
+        }
+        catch (Exception ex) { Log.Error(ex, "Export DOCX failed"); Tab.StatusText = $"Export error: {ex.Message}"; }
+    }
+
+    private async void OnExportDialogClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab is not { IsDocumentLoaded: true, PdfBytes: not null }) return;
+        try
+        {
+            var registry = PDFEditor.Core.Services.Export.ExportProviderRegistry.CreateDefault();
+            var dialog = new Window
+            {
+                Title = "Export Document",
+                Width = 480, Height = 420,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                CanResize = false
+            };
+
+            var formatCombo = new ComboBox
+            {
+                SelectedIndex = 0,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Margin = new Thickness(10, 5)
+            };
+            foreach (var p in registry.Providers)
+                formatCombo.Items.Add(new ComboBoxItem { Content = p.FormatName, Tag = p });
+
+            var dpiInput = new TextBox { Text = "150", Watermark = "DPI", Margin = new Thickness(10, 5) };
+            var qualityInput = new TextBox { Text = "90", Watermark = "Quality (1-100)", Margin = new Thickness(10, 5) };
+            var pageRangeInput = new TextBox { Watermark = $"Page range (e.g. 1-{Tab.PageCount}) or leave blank for all", Margin = new Thickness(10, 5) };
+
+            var statusLabel = new TextBlock { Text = "", FontSize = 11, Opacity = 0.6, Margin = new Thickness(10, 5), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+            var progressBar = new ProgressBar { Minimum = 0, Maximum = 100, IsVisible = false, Margin = new Thickness(10, 5) };
+
+            var exportBtn = new Button
+            {
+                Content = "Export",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Padding = new Thickness(24, 8),
+                Margin = new Thickness(10)
+            };
+
+            exportBtn.Click += async (_, _) =>
+            {
+                var selectedItem = formatCombo.SelectedItem as ComboBoxItem;
+                if (selectedItem?.Tag is not PDFEditor.Core.Abstractions.IExportProvider provider) return;
+
+                int.TryParse(dpiInput.Text, out int dpi);
+                int.TryParse(qualityInput.Text, out int quality);
+                if (dpi <= 0) dpi = 150;
+                if (quality <= 0 || quality > 100) quality = 90;
+
+                int[]? pageIndices = null;
+                if (!string.IsNullOrWhiteSpace(pageRangeInput.Text))
+                    pageIndices = ParsePageRange(pageRangeInput.Text, Tab.PageCount);
+
+                var options = new PDFEditor.Core.Abstractions.ExportOptions
+                {
+                    Dpi = dpi,
+                    Quality = quality,
+                    PageIndices = pageIndices,
+                    OutputFormat = provider.SupportedExtensions[0].TrimStart('.').ToUpperInvariant(),
+                    BaseFileName = IOPath.GetFileNameWithoutExtension(Tab.FilePath ?? "document")
+                };
+
+                exportBtn.IsEnabled = false;
+                progressBar.IsVisible = true;
+                statusLabel.Text = "Exporting...";
+
+                try
+                {
+                    if (provider.SupportsPerPageExport && (pageIndices == null || pageIndices.Length > 1))
+                    {
+                        // Per-page export: pick folder
+                        var folder = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+                        {
+                            Title = "Select Output Folder"
+                        });
+                        if (folder.Count == 0) { exportBtn.IsEnabled = true; progressBar.IsVisible = false; statusLabel.Text = ""; return; }
+                        var dirPath = folder[0].TryGetLocalPath();
+                        if (string.IsNullOrEmpty(dirPath)) { exportBtn.IsEnabled = true; progressBar.IsVisible = false; return; }
+
+                        var progress = new Progress<PDFEditor.Core.Abstractions.ExportProgress>(p =>
+                        {
+                            progressBar.Value = p.ProgressPercent;
+                            statusLabel.Text = p.Message;
+                        });
+
+                        var results = await provider.ExportPagesAsync(Tab.PdfBytes, options, progress);
+                        int successCount = 0;
+                        foreach (var r in results)
+                        {
+                            if (r.Success)
+                            {
+                                File.WriteAllBytes(IOPath.Combine(dirPath, r.FileName), r.Data);
+                                successCount++;
+                            }
+                        }
+                        statusLabel.Text = $"Exported {successCount} file(s) to {dirPath}";
+                        Tab.StatusText = statusLabel.Text;
+                    }
+                    else
+                    {
+                        // Single-file export: pick file
+                        var ext = provider.SupportedExtensions[0];
+                        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+                        {
+                            Title = "Export",
+                            DefaultExtension = ext.TrimStart('.'),
+                            FileTypeChoices = new[] { new FilePickerFileType(provider.FormatName) { Patterns = new[] { $"*{ext}" } } },
+                            SuggestedFileName = $"{options.BaseFileName}{ext}"
+                        });
+                        if (file != null)
+                        {
+                            var path = file.TryGetLocalPath();
+                            if (!string.IsNullOrEmpty(path))
+                            {
+                                var result = await provider.ExportAsync(Tab.PdfBytes, options);
+                                if (result.Success)
+                                {
+                                    File.WriteAllBytes(path, result.Data);
+                                    statusLabel.Text = $"Exported: {IOPath.GetFileName(path)}";
+                                    Tab.StatusText = statusLabel.Text;
+                                }
+                                else
+                                {
+                                    statusLabel.Text = $"Failed: {result.ErrorMessage}";
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Export dialog error");
+                    statusLabel.Text = $"Error: {ex.Message}";
+                }
+                finally
+                {
+                    exportBtn.IsEnabled = true;
+                    progressBar.IsVisible = false;
+                }
+            };
+
+            dialog.Content = new StackPanel
+            {
+                Spacing = 2,
+                Margin = new Thickness(10),
+                Children =
+                {
+                    new TextBlock { Text = "Export Format", FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(10, 10, 10, 0) },
+                    formatCombo,
+                    new TextBlock { Text = "Settings", FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(10, 10, 10, 0) },
+                    dpiInput,
+                    qualityInput,
+                    pageRangeInput,
+                    new Separator { Margin = new Thickness(10, 8) },
+                    progressBar,
+                    statusLabel,
+                    exportBtn
+                }
+            };
+
+            await dialog.ShowDialog(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Export dialog failed"); }
+    }
+
+    private static int[]? ParsePageRange(string input, int maxPages)
+    {
+        var pages = new List<int>();
+        var parts = input.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var part in parts)
+        {
+            if (part.Contains('-'))
+            {
+                var range = part.Split('-');
+                if (range.Length == 2 && int.TryParse(range[0], out int start) && int.TryParse(range[1], out int end))
+                {
+                    start = Math.Max(1, start);
+                    end = Math.Min(maxPages, end);
+                    for (int i = start; i <= end; i++)
+                        pages.Add(i - 1); // convert to 0-based
+                }
+            }
+            else if (int.TryParse(part, out int page) && page >= 1 && page <= maxPages)
+            {
+                pages.Add(page - 1); // convert to 0-based
+            }
+        }
+        return pages.Count > 0 ? pages.Distinct().OrderBy(p => p).ToArray() : null;
     }
 
     #endregion
@@ -2293,6 +2523,207 @@ public partial class MainWindow : Window
 
     #endregion
 
+    #region OCR
+
+    private async void OnOcrCurrentPageClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var ocrService = new PDFEditor.Core.Services.TesseractOcrService();
+            if (!ocrService.IsAvailable)
+            {
+                var errorDialog = new Window
+                {
+                    Title = "OCR Unavailable",
+                    Width = 450, Height = 200,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    CanResize = false
+                };
+                errorDialog.Content = new StackPanel
+                {
+                    Margin = new Thickness(20),
+                    Spacing = 10,
+                    Children =
+                    {
+                        new TextBlock { Text = "Tesseract OCR is not available.", FontWeight = FontWeight.Bold, FontSize = 16 },
+                        new TextBlock { Text = "Please install Tesseract OCR and download language data files (.traineddata) to one of these locations:", TextWrapping = TextWrapping.Wrap },
+                        new TextBlock { Text = $"• {System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata")}\n• Set TESSDATA_PREFIX environment variable\n• C:\\Program Files\\Tesseract-OCR\\tessdata", FontSize = 12, TextWrapping = TextWrapping.Wrap }
+                    }
+                };
+                await errorDialog.ShowDialog(this);
+                return;
+            }
+
+            // Language selection
+            var languages = ocrService.GetSupportedLanguages();
+            var langDialog = new Window
+            {
+                Title = "OCR - Current Page",
+                Width = 420, Height = 320,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                CanResize = false
+            };
+
+            var langCombo = new ComboBox { ItemsSource = languages, SelectedIndex = languages.IndexOf("eng") >= 0 ? languages.IndexOf("eng") : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var dpiCombo = new ComboBox { ItemsSource = new[] { "150", "200", "300", "400" }, SelectedIndex = 2, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var statusLabel = new TextBlock { Text = $"Page {Tab.CurrentPageIndex + 1} will be processed.", Margin = new Thickness(0, 5, 0, 0) };
+            var runBtn = new Button { Content = "Run OCR", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
+            var resultText = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 0, IsVisible = false };
+
+            runBtn.Click += async (_, _) =>
+            {
+                var lang = langCombo.SelectedItem?.ToString() ?? "eng";
+                var dpi = int.TryParse(dpiCombo.SelectedItem?.ToString(), out int d) ? d : 300;
+                statusLabel.Text = "Running OCR... please wait.";
+                runBtn.IsEnabled = false;
+
+                try
+                {
+                    var text = await ocrService.OcrPdfPage(Tab.PdfBytes!, Tab.CurrentPageIndex, lang, dpi);
+                    resultText.Text = text;
+                    resultText.Height = 150;
+                    resultText.IsVisible = true;
+                    langDialog.Height = 500;
+                    statusLabel.Text = $"OCR complete. {text.Length} characters recognized.";
+                }
+                catch (Exception ex)
+                {
+                    statusLabel.Text = $"OCR failed: {ex.Message}";
+                    Log.Error(ex, "OCR current page failed");
+                }
+                finally { runBtn.IsEnabled = true; }
+            };
+
+            langDialog.Content = new ScrollViewer
+            {
+                Content = new StackPanel
+                {
+                    Margin = new Thickness(20),
+                    Spacing = 8,
+                    Children =
+                    {
+                        new TextBlock { Text = "Language:", FontWeight = FontWeight.SemiBold },
+                        langCombo,
+                        new TextBlock { Text = "DPI (higher = better quality, slower):", FontWeight = FontWeight.SemiBold },
+                        dpiCombo,
+                        runBtn,
+                        statusLabel,
+                        resultText
+                    }
+                }
+            };
+            await langDialog.ShowDialog(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "OCR current page dialog error"); }
+    }
+
+    private async void OnOcrAllPagesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var ocrService = new PDFEditor.Core.Services.TesseractOcrService();
+            if (!ocrService.IsAvailable)
+            {
+                var errorDialog = new Window
+                {
+                    Title = "OCR Unavailable",
+                    Width = 450, Height = 180,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    CanResize = false
+                };
+                errorDialog.Content = new StackPanel
+                {
+                    Margin = new Thickness(20),
+                    Spacing = 10,
+                    Children =
+                    {
+                        new TextBlock { Text = "Tesseract OCR is not available.", FontWeight = FontWeight.Bold },
+                        new TextBlock { Text = "Install Tesseract OCR and ensure tessdata files are accessible.", TextWrapping = TextWrapping.Wrap }
+                    }
+                };
+                await errorDialog.ShowDialog(this);
+                return;
+            }
+
+            var languages = ocrService.GetSupportedLanguages();
+            var dialog = new Window
+            {
+                Title = "OCR - All Pages",
+                Width = 500, Height = 400,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                CanResize = true
+            };
+
+            var langCombo = new ComboBox { ItemsSource = languages, SelectedIndex = languages.IndexOf("eng") >= 0 ? languages.IndexOf("eng") : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var dpiCombo = new ComboBox { ItemsSource = new[] { "150", "200", "300" }, SelectedIndex = 1, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var progressBar = new ProgressBar { Minimum = 0, Maximum = 100, Height = 20, IsVisible = false };
+            var statusLabel = new TextBlock { Text = $"Will OCR all {Tab.PageCount} pages.", Margin = new Thickness(0, 5, 0, 0) };
+            var runBtn = new Button { Content = "Run OCR on All Pages", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
+            var resultText = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 0, IsVisible = false };
+
+            runBtn.Click += async (_, _) =>
+            {
+                var lang = langCombo.SelectedItem?.ToString() ?? "eng";
+                var dpi = int.TryParse(dpiCombo.SelectedItem?.ToString(), out int d) ? d : 200;
+                statusLabel.Text = "Running OCR... this may take a while.";
+                runBtn.IsEnabled = false;
+                progressBar.IsVisible = true;
+
+                try
+                {
+                    var progress = new Progress<(int current, int total)>(p =>
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            progressBar.Value = (double)p.current / p.total * 100;
+                            statusLabel.Text = $"Processing page {p.current} of {p.total}...";
+                        });
+                    });
+
+                    var text = await ocrService.OcrEntirePdf(Tab.PdfBytes!, lang, dpi, progress);
+                    resultText.Text = text;
+                    resultText.Height = 200;
+                    resultText.IsVisible = true;
+                    dialog.Height = 650;
+                    statusLabel.Text = $"OCR complete. {text.Length} characters recognized across {Tab.PageCount} pages.";
+                    progressBar.Value = 100;
+                }
+                catch (Exception ex)
+                {
+                    statusLabel.Text = $"OCR failed: {ex.Message}";
+                    Log.Error(ex, "OCR all pages failed");
+                }
+                finally { runBtn.IsEnabled = true; }
+            };
+
+            dialog.Content = new ScrollViewer
+            {
+                Content = new StackPanel
+                {
+                    Margin = new Thickness(20),
+                    Spacing = 8,
+                    Children =
+                    {
+                        new TextBlock { Text = "Language:", FontWeight = FontWeight.SemiBold },
+                        langCombo,
+                        new TextBlock { Text = "DPI:", FontWeight = FontWeight.SemiBold },
+                        dpiCombo,
+                        runBtn,
+                        progressBar,
+                        statusLabel,
+                        resultText
+                    }
+                }
+            };
+            await dialog.ShowDialog(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "OCR all pages dialog error"); }
+    }
+
+    #endregion
+
     #region Undo History
 
     private void OnUndoHistoryClick(object? sender, RoutedEventArgs e)
@@ -2471,10 +2902,53 @@ public partial class MainWindow : Window
 
     private void OnAboutClick(object? sender, RoutedEventArgs e)
     {
+        var version = PDFEditor.Core.AppConfig.ApplicationVersion;
+
+        var githubLink = new Button
+        {
+            Content = "GitHub Repository",
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            Padding = new Thickness(12, 6),
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+        githubLink.Click += (_, _) =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "https://github.com/OriolCanillasGautier/PDF-Editor",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex) { Log.Warn(ex, "Failed to open GitHub link"); }
+        };
+
+        var licenseLink = new Button
+        {
+            Content = "View License (AGPL v3)",
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            Padding = new Thickness(12, 6),
+            Background = Brushes.Transparent,
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+        licenseLink.Click += (_, _) =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "https://github.com/OriolCanillasGautier/PDF-Editor/blob/main/LICENSE",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex) { Log.Warn(ex, "Failed to open license link"); }
+        };
+
         var w = new Window
         {
             Title = "About PDF Editor",
-            Width = 400, Height = 250,
+            Width = 450, Height = 380,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
             Content = new StackPanel
@@ -2482,12 +2956,20 @@ public partial class MainWindow : Window
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
                 Spacing = 8,
+                Margin = new Thickness(20),
                 Children =
                 {
-                    new TextBlock { Text = "PDF Editor", FontSize = 24, FontWeight = FontWeight.Bold, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center },
-                    new TextBlock { Text = "Cross-platform PDF Editor", FontSize = 13, Opacity = 0.6, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center },
-                    new TextBlock { Text = "Built with Avalonia UI + iText7 + Docnet", FontSize = 12, Opacity = 0.5, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center },
-                    new TextBlock { Text = "AGPL v3 License", FontSize = 11, Opacity = 0.4, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center }
+                    new TextBlock { Text = "PDF Editor", FontSize = 28, FontWeight = FontWeight.Bold, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center },
+                    new TextBlock { Text = $"Version {version}", FontSize = 14, Opacity = 0.7, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center },
+                    new TextBlock { Text = "Cross-platform PDF Editor", FontSize = 13, Opacity = 0.6, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) },
+                    new Separator { Margin = new Thickness(0, 8) },
+                    new TextBlock { Text = "Built with:", FontSize = 12, FontWeight = FontWeight.SemiBold, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center },
+                    new TextBlock { Text = "Avalonia UI 11 • iText7 • Docnet (PDFium) • Magick.NET • ReactiveUI", FontSize = 11, Opacity = 0.5, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center, TextWrapping = Avalonia.Media.TextWrapping.Wrap, TextAlignment = TextAlignment.Center },
+                    new Separator { Margin = new Thickness(0, 8) },
+                    githubLink,
+                    licenseLink,
+                    new Separator { Margin = new Thickness(0, 4) },
+                    new TextBlock { Text = "© 2026 Oriol Canillas. Licensed under AGPL v3.", FontSize = 10, Opacity = 0.4, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center }
                 }
             }
         };

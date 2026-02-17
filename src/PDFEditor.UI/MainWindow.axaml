@@ -157,9 +157,12 @@
                 </MenuItem>
                 <Separator />
                 <MenuItem Header="E_xport">
+                    <MenuItem Header="Export _Dialog..." Click="OnExportDialogClick" />
+                    <Separator />
                     <MenuItem Header="Pages to _Images..." Click="OnExportImagesClick" />
                     <MenuItem Header="All _Text..." Click="OnExportTextClick" />
                     <MenuItem Header="To _HTML..." Click="OnExportHtmlClick" />
+                    <MenuItem Header="To _Word (DOCX)..." Click="OnExportDocxClick" />
                 </MenuItem>
                 <MenuItem Header="_Print..." InputGesture="Ctrl+P" Click="OnPrintClick" />
                 <Separator />
@@ -206,6 +209,9 @@
                 <MenuItem Header="P_assword Protect..." Click="OnPasswordProtectClick" />
                 <Separator />
                 <MenuItem Header="_Batch Processing..." Click="OnBatchProcessingClick" />
+                <Separator />
+                <MenuItem Header="_OCR Current Page..." Click="OnOcrCurrentPageClick" />
+                <MenuItem Header="OCR _All Pages..." Click="OnOcrAllPagesClick" />
             </MenuItem>
             <MenuItem Header="_Annotate">
                 <MenuItem Header="Toggle Annotation _Mode" Click="OnToggleAnnotationMode" />

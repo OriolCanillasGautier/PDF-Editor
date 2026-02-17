@@ -5,20 +5,33 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Project initialization and scaffolding
-- Core architecture and design
-- PDF document interface (IPdfDocument)
-- iText7-based PDF service
-- Avalonia UI framework setup
-- Dependency injection configuration
-- Comprehensive documentation
+- **Export System Refactor**: Provider-based `IExportProvider` architecture with `ExportProviderRegistry`
+  - `ImageExportProvider` — PNG, JPEG, TIFF, BMP, WebP export with DPI control
+  - `TextExportProvider` — Plain text extraction to .txt
+  - `HtmlExportProvider` — Visual HTML with base64-embedded page images
+  - `DocxExportProvider` — Microsoft Word export via DocumentFormat.OpenXml
+- **Unified Export Dialog**: Format selection, DPI/quality, page range, progress bar
+- **OCR Implementation**: `TesseractOcrService` with multi-language support
+  - OCR Current Page and OCR All Pages dialogs
+  - Language and DPI selection
+  - Progress reporting for multi-page OCR
+- **About Dialog**: GitHub repository link, version info, license link, library credits
+- **Comprehensive Unit Tests**: 97 tests across 9 test files
+  - TestPdfGenerator helper for in-memory PDF generation
+  - Tests for: PdfOperations, PdfSearchService, PdfSplitService, PdfSecurityService, PdfCropService, PdfWatermarkService, PdfAnnotationService, PdfExportService, UndoRedoManager, ExportProviderRegistry
+- **New NuGet Package**: DocumentFormat.OpenXml 3.0.1
+
+### Changed
+- `CoreServiceCollectionExtensions` now registers `ExportProviderRegistry` and `TesseractOcrService`
+- Tools menu expanded with OCR operations
+- Export menu expanded with Export Dialog and DOCX export
 
 ### TODO
-- Implement PDF rendering with Pdfium.Net
-- Add image processing capabilities
-- Integrate OCR engine
-- Implement clawPDF wrapper
-- Create UI components
+- Complete ClawPDF integration
+- Form handling
+- Digital signatures
+- Document comparison
+- Plugin system
 
 ## [0.0.1 - Initial Setup] - 2026-02-17
 

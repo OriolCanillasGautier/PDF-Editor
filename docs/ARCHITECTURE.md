@@ -8,7 +8,7 @@ The PDF Editor is structured using a **layered architecture** with clear separat
 ┌─────────────────────────────────────────────┐
 │         UI Layer (Avalonia/MVVM)            │
 │     (PDFEditor.UI Project)                  │
-│  - MainWindow (XAML)                        │
+│  - MainWindow (XAML + code-behind)          │
 │  - ViewModels (ReactiveUI)                  │
 │  - Commands & Events                        │
 └─────────────────────────────────────────────┘
@@ -16,19 +16,63 @@ The PDF Editor is structured using a **layered architecture** with clear separat
 ┌─────────────────────────────────────────────┐
 │  Core Services Layer (Business Logic)       │
 │     (PDFEditor.Core Project)                │
-│  - IPdfDocument                             │
-│  - IImageProcessor                          │
-│  - IOcrEngine                               │
-│  - ITextPdfService (Impl)                   │
+│  - IPdfDocument / ITextPdfService           │
+│  - IOcrEngine / TesseractOcrService         │
+│  - IExportProvider / ExportProviderRegistry │
+│  - PdfOperations, PdfRenderService          │
+│  - PdfSearchService, PdfSplitService        │
+│  - PdfSecurityService, PdfCropService       │
+│  - PdfWatermarkService, PdfAnnotationService│
+│  - PdfExportService, PdfBatchService        │
+│  - SessionService, UndoRedoManager          │
 └─────────────────────────────────────────────┘
                       ↓
 ┌─────────────────────────────────────────────┐
 │  Integration Layer (External Tools)         │
-│  - ClawPDFIntegration                       │
-│  - Ghostscript Bridge                       │
-│  - Tesseract Bridge                         │
+│  - ClawPDFIntegration (stub)                │
+│  - Tesseract.NET (OCR)                      │
+│  - Docnet.Core / PDFium (rendering)         │
+│  - Magick.NET (image processing)            │
+│  - DocumentFormat.OpenXml (DOCX export)     │
 └─────────────────────────────────────────────┘
 ```
+
+## Core Services Reference
+
+| Service | Purpose | Library |
+|---------|---------|---------|
+| `ITextPdfService` | Document load/save, IPdfDocument impl | iText7 |
+| `PdfOperations` | Page manipulation (rotate, delete, merge, metadata) | iText7 |
+| `PdfRenderService` | PDF → BGRA pixel rendering | Docnet.Core (PDFium) |
+| `PdfExportService` | Export to images, text, HTML, images-to-PDF | Magick.NET + Docnet |
+| `PdfSearchService` | Full-text search with context, text extraction | iText7 |
+| `PdfSplitService` | Split, extract, reorder, move, insert pages | iText7 |
+| `PdfSecurityService` | AES-256 encryption, password protection | iText7 |
+| `PdfCropService` | Crop, margins, resize to standard sizes | iText7 |
+| `PdfWatermarkService` | Text watermarks, headers, footers, page numbers | iText7 |
+| `PdfAnnotationService` | Burn annotations into PDF (10 types) | iText7 + Magick.NET |
+| `PdfBatchService` | Batch operations on multiple files | All above |
+| `TesseractOcrService` | OCR text recognition with multi-language | Tesseract.NET 5.2.0 |
+| `SessionService` | User session persistence (JSON) | Newtonsoft.Json |
+| `UndoRedoManager` | Undo/redo stack with state snapshots | Custom |
+| `ExportProviderRegistry` | Registry for pluggable export format providers | Custom |
+
+## Export Provider System
+
+The export system uses a provider-based architecture for extensibility:
+
+```
+IExportProvider (interface)
+├── ImageExportProvider    → PNG, JPEG, TIFF, BMP, WebP
+├── TextExportProvider     → TXT
+├── HtmlExportProvider     → HTML (visual with base64 images)
+└── DocxExportProvider     → DOCX (Microsoft Word)
+```
+
+**Adding a new export format:**
+1. Create a class implementing `IExportProvider` in `Core/Services/Export/`
+2. Register it in `ExportProviderRegistry.CreateDefault()`
+3. It automatically appears in the Export Dialog UI
 
 ## Core Interfaces
 
@@ -89,6 +133,14 @@ public interface IOcrEngine
     List<string> GetSupportedLanguages();
 }
 ```
+
+**Current Implementation:** `TesseractOcrService`
+- Uses Tesseract.NET 5.2.0 for OCR
+- Auto-discovers tessdata directory from common locations or `TESSDATA_PREFIX` env var
+- Supports per-page PDF OCR (`OcrPdfPage`) and full-document OCR (`OcrEntirePdf`)
+- Configurable DPI for render quality (default: 300)
+- Progress reporting for multi-page operations
+- Lazy engine initialization with language switching
 
 ### 4. IImageProcessor
 Image manipulation:
@@ -175,26 +227,33 @@ public class MainViewModel : ViewModelBase
 
 ## Testing Strategy
 
-Using **xUnit** + **Moq** for unit tests:
+Using **xUnit** + **Moq** for unit tests. **97 tests** across 9 test files.
 
+### Test Structure
+```
+src/PDFEditor.Tests/
+├── Helpers/
+│   └── TestPdfGenerator.cs        # In-memory PDF generation for tests
+└── Core/
+    ├── PdfOperationsTests.cs       # Page count, delete, rotate, merge, text, metadata
+    ├── PdfSearchServiceTests.cs    # Search, case sensitivity, multi-page, count, extract
+    ├── PdfSplitServiceTests.cs     # Extract, split all, move, insert, reorder
+    ├── PdfSecurityServiceTests.cs  # Encrypt, decrypt, is-encrypted, try-open
+    ├── PdfCropServiceTests.cs      # Crop, margins, resize, standard sizes
+    ├── PdfWatermarkServiceTests.cs # Watermark, header/footer, page numbers
+    ├── PdfAnnotationServiceTests.cs# Burn annotations, clone, out-of-range
+    ├── PdfExportServiceTests.cs    # Image export, text, HTML, images-to-PDF
+    ├── UndoRedoManagerTests.cs     # Undo, redo, clear, history, multi-step
+    └── ExportProviderRegistryTests.cs # Registry, providers, async export
+```
+
+### TestPdfGenerator
+Helper class that generates test PDFs in-memory using iText7:
 ```csharp
-// PDFEditor.Tests/PdfDocumentTests.cs
-public class PdfDocumentTests
-{
-    [Fact]
-    public void LoadFromFile_ValidPath_LoadsDocument()
-    {
-        // Arrange
-        var pdfService = new ITextPdfService();
-        var testPdfPath = "samples/test.pdf";
-        
-        // Act
-        pdfService.LoadFromFile(testPdfPath);
-        
-        // Assert
-        Assert.True(pdfService.PageCount > 0);
-    }
-}
+TestPdfGenerator.CreateSimplePdf(pageCount);     // N pages with sample text
+TestPdfGenerator.CreatePdfWithContent("text");    // Specific content per page
+TestPdfGenerator.CreatePdfWithMetadata(t, a, s);  // With title/author/subject
+TestPdfGenerator.CreateMinimalPdf();               // Single page, "Hello World"
 ```
 
 ## Build & Compile Targets

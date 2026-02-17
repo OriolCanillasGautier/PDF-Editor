@@ -4,26 +4,50 @@ A comprehensive, open-source PDF editor built with C# and Avalonia UI, integrati
 
 ## Features
 
-### Current (Version 0.0.1)
-- Multi-library architecture (iText7, PDFSharp, Pdfium.Net)
-- Avalonia cross-platform UI framework
-- Modular, extensible design
-- Dependency injection for loose coupling
+### Current (Version 1.0.0-alpha)
 
-### In Development (MVP)
-- PDF viewing and navigation
-- Page thumbnail previews
-- Text extraction
-- Page manipulation (rotation, removal, reordering)
+**PDF Viewing & Editing**
+- Multi-tab document interface with page thumbnails
+- Page manipulation: rotate, delete, reorder, merge, split, extract
+- Text extraction and full-text search with context snippets
+- Comprehensive annotation tools (text, highlight, rectangle, ellipse, arrow, freehand, blur, redact, stamps, sticky notes)
+- Undo/redo with full state history
+- Dark/light theme switching
+
+**Export System**
+- Provider-based export architecture (`IExportProvider`)
+- Export formats: PNG, JPEG, TIFF, BMP, WebP, Plain Text, HTML, Microsoft Word (DOCX)
+- Unified export dialog with format selection, DPI/quality control, page range, and progress
+- Images-to-PDF conversion
+
+**OCR (Optical Character Recognition)**
+- Tesseract-based OCR engine with multi-language support
+- Per-page and full-document OCR
+- Configurable DPI for quality control
+
+**Security & Metadata**
+- Password protection and AES-256 encryption
+- Permission management (print, copy, edit)
+- Metadata viewing and editing (title, author, subject)
+
+**Batch Processing**
+- Batch rotate, watermark, page numbers, encrypt, export, merge, split
+- Progress reporting
+
+**Additional**
+- Watermarks (text, diagonal, configurable opacity and rotation)
+- Headers, footers, and page number stamping
+- Page cropping and resizing (A4, Letter, Legal, A3)
+- Session save/restore
+- Cross-platform: Windows, Linux, macOS
 
 ### Planned
-- OCR text layer creation (Tesseract/PaddleOCR)
-- Image conversion (PDF to/from PNG/JPEG/TIFF)
 - ClawPDF printer integration
-- Batch processing
-- Document encryption
-- Metadata editing
-- Command-line interface
+- Interactive PDF form handling
+- Digital signatures with certificates
+- Document comparison
+- Plugin system
+- Cloud integration
 
 ## Technology Stack
 
@@ -40,9 +64,10 @@ A comprehensive, open-source PDF editor built with C# and Avalonia UI, integrati
 
 ### Additional
 - **Image Processing**: Magick.NET
-- **OCR**: Tesseract.NET / PaddleOCR
+- **OCR**: Tesseract.NET 5.2.0
+- **Office Export**: DocumentFormat.OpenXml 3.0.1
 - **Logging**: NLog
-- **Testing**: xUnit + Moq
+- **Testing**: xUnit + Moq (97 tests)
 
 ## System Requirements
 
@@ -97,12 +122,18 @@ Follow the installation wizard
 PDF-Editor/
 ├── src/
 │   ├── PDFEditor.Core/              # Core business logic
+│   │   ├── Abstractions/            # Interfaces (IPdfDocument, IOcrEngine, IExportProvider)
+│   │   └── Services/                # Service implementations
+│   │       └── Export/              # Export providers (Image, Text, HTML, DOCX)
 │   ├── PDFEditor.UI/                # Avalonia user interface
-│   ├── PDFEditor.ClawPDFIntegration/# ClawPDF wrapper
-│   └── PDFEditor.Tests/             # Unit tests
+│   │   └── ViewModels/              # MVVM ViewModels (MainViewModel, DocumentTabViewModel)
+│   ├── PDFEditor.ClawPDFIntegration/# ClawPDF wrapper (stub)
+│   └── PDFEditor.Tests/             # Unit tests (97 tests)
+│       ├── Core/                    # Service tests
+│       └── Helpers/                 # TestPdfGenerator
 ├── docs/                            # Documentation
-├── libs/                            # External libraries
-└── samples/                         # Sample PDF files
+├── installer/                       # WiX installer
+└── artifacts/                       # Build artifacts
 ```
 
 ## Quick Start for Developers
@@ -144,32 +175,21 @@ See [LICENSE](LICENSE) for details.
 
 - [x] Project initialization
 - [x] Architecture design
-- [ ] MVP (0.1) - Basic PDF viewing
-- [ ] v0.2 - Page operations
-- [ ] v0.3 - Image processing
-- [ ] v0.4 - OCR support
-- [ ] v0.5 - ClawPDF integration
+- [x] PDF viewing with multi-tab interface
+- [x] Page operations (rotate, delete, merge, split, extract, reorder)
+- [x] Image export (PNG, JPEG, TIFF, BMP, WebP)
+- [x] Provider-based export system (Image, Text, HTML, DOCX)
+- [x] Full-text search with context snippets
+- [x] Annotation tools (10 types)
+- [x] OCR support (Tesseract, multi-language)
+- [x] Security (encryption, passwords, permissions)
+- [x] Batch processing
+- [x] Unit test suite (97 tests)
+- [ ] ClawPDF integration
+- [ ] Interactive form handling
+- [ ] Digital signatures
+- [ ] Document comparison
 - [ ] v1.0 - Production release
-
-## Key Features Planned
-
-### Phase 1: PDF Basics
-- Open/save PDFs
-- View pages with zoom/pan
-- Extract text
-- Rotate/remove/reorder pages
-
-### Phase 2: Image Operations
-- Convert PDF pages to images (PNG, JPEG, TIFF)
-- Convert images to PDF
-- Batch processing
-
-### Phase 3: Advanced Features
-- OCR text recognition
-- Create searchable PDFs
-- ClawPDF printer integration
-- Document encryption
-- Metadata editing
 
 ## Community & Support
 
@@ -191,6 +211,6 @@ This is an open-source project and is provided as-is. Always test thoroughly bef
 
 ---
 
-**Status**: Early Development (v0.0.1)  
+**Status**: Alpha (v1.0.0-alpha)  
 **Last Updated**: February 17, 2026  
 **Maintainer**: Oriol Canillas

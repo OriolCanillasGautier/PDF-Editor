@@ -4,10 +4,60 @@ This document outlines the planned improvements and features for the PDF Editor 
 
 ---
 
+## Change Log
+
+| Date | Phase/Step | Changes Made | Files Updated |
+|------|------------|--------------|---------------|
+| 2026-02-17 | Phase 1, Step 1 | Enhanced About dialog with GitHub link, version info, license, library credits | `MainWindow.axaml.cs` |
+| 2026-02-17 | Phase 1, Step 2 | Created IExportProvider interface, ExportResult, ExportOptions, ExportProgress | `Core/Abstractions/IExportProvider.cs` |
+| 2026-02-17 | Phase 1, Step 3 | Implemented ImageExportProvider, TextExportProvider, HtmlExportProvider, ExportProviderRegistry | `Core/Services/Export/` (4 files) |
+| 2026-02-17 | Phase 1, Step 4 | Implemented DocxExportProvider with DocumentFormat.OpenXml | `Core/Services/Export/DocxExportProvider.cs`, `Core.csproj` |
+| 2026-02-17 | Phase 1, Step 5 | Created unified Export Dialog UI with format selector, DPI/quality, page range, progress | `MainWindow.axaml.cs`, `MainWindow.axaml` |
+| 2026-02-17 | Phase 1, Step 6 | DI registration for ExportProviderRegistry | `CoreServiceCollectionExtensions.cs` |
+| 2026-02-17 | Phase 2, Step 1 | Created test infrastructure: TestPdfGenerator helper, 9 test files, 97 passing tests | `Tests/Helpers/`, `Tests/Core/` (9 files) |
+| 2026-02-17 | Phase 2, Step 2 | Implemented TesseractOcrService with multi-language, per-page and full-doc OCR | `Core/Services/TesseractOcrService.cs` |
+| 2026-02-17 | Phase 2, Step 3 | Added OCR UI (current page + all pages) with language selection, DPI, progress | `MainWindow.axaml`, `MainWindow.axaml.cs` |
+| 2026-02-17 | Phase 2, Step 4 | DI registration for TesseractOcrService / IOcrEngine | `CoreServiceCollectionExtensions.cs` |
+| 2026-02-17 | Docs | Updated PLAN.md, README.md, ARCHITECTURE.md, CHANGELOG.md | All .md files |
+
+---
+
+## Phase Status
+
+| Phase | Status | Started | Completed | Progress |
+|-------|--------|---------|-----------|----------|
+| Phase 1: Core Export & About | Complete | 2026-02-17 | 2026-02-17 | 100% |
+| Phase 2: OCR & Testing | Complete | 2026-02-17 | 2026-02-17 | 100% |
+| Phase 3: ClawPDF, Forms, Signatures | Not Started | - | - | 0% |
+| Phase 4: Comparison, Plugins, Cloud | Not Started | - | - | 0% |
+
+---
+
+## Decision Log
+
+| Date | Decision | Rationale | Alternatives Considered |
+|------|----------|-----------|------------------------|
+| 2026-02-17 | Provider-based export system (IExportProvider) | Extensible architecture for adding new formats without modifying existing code | Monolithic PdfExportService (not extensible) |
+| 2026-02-17 | DocumentFormat.OpenXml for DOCX export | Official Microsoft library, well-maintained, compatible with AGPL | Aspose.Words (commercial), NPOI (less maintained) |
+| 2026-02-17 | Tesseract.NET for OCR implementation | Mature, well-supported, cross-platform, Apache 2.0 license | PaddleOCR (heavier), Windows.Media.Ocr (Windows-only) |
+| 2026-02-17 | In-memory test PDF generation | No external test fixtures needed, deterministic, fast tests | Sample PDF files on disk (fragile, harder to maintain) |
+
+---
+
+## Active Issues
+
+| ID | Priority | Issue | Impact | Status | Owner |
+|----|----------|-------|--------|--------|-------|
+| ERR-001 | P2 | ClawPDF wrapper not implemented | No print-to-PDF via virtual printer | Open | - |
+| ERR-002 | P3 | PdfSecurityService.Decrypt requires owner password | User password alone cannot decrypt for copy; by design in iText7 | Known | - |
+| ERR-003 | P3 | Tesseract OCR requires tessdata files installed separately | Users must download .traineddata files manually | Open | - |
+
+---
+
 ## 1. About Dialog - GitHub Link
 
 **Priority:** High  
-**Status:** Pending
+**Status:** ✅ Complete
 
 ### Current State
 The About dialog is very basic with no links to external resources.
@@ -35,7 +85,7 @@ System.Diagnostics.Process.Start(new ProcessStartInfo
 ## 2. Enhanced Export System
 
 **Priority:** High  
-**Status:** Partial Implementation
+**Status:** ✅ Core Complete (Image, Text, HTML, DOCX providers implemented)
 
 ### Current State
 The current export system (`PdfExportService.cs`) supports:
@@ -229,19 +279,25 @@ src/PDFEditor.UI/Resources/Icons/
 
 ## 4. Features Pending Implementation
 
-### 4.1 OCR Integration (Partial)
+### 4.1 OCR Integration
 
-**Status:** Tesseract NuGet installed, implementation incomplete
+**Status:** ✅ Core Complete
 
-**Required:**
-- [ ] Complete `IOcrEngine` implementation
-- [ ] Multi-language support (ENG, SPA, FRA, DEU, CAT)
-- [ ] UI for OCR operations:
+**Completed:**
+- [x] Complete `IOcrEngine` implementation (`TesseractOcrService`)
+- [x] Multi-language support (auto-detects installed tessdata languages)
+- [x] UI for OCR operations:
   - Language selection dropdown
-  - Progress indicator for large documents
-  - Confidence score display
+  - DPI selection (150-400)
+  - Progress indicator for multi-page documents
+  - Text result display
+- [x] Per-page OCR and full-document OCR
+- [x] DI registration
+
+**Remaining:**
 - [ ] Create searchable PDFs with embedded text layer
 - [ ] Batch OCR processing
+- [ ] Confidence score display per word
 
 ### 4.2 ClawPDF Integration (Partial)
 
@@ -325,11 +381,16 @@ src/PDFEditor.UI/Resources/Icons/
 
 ### 6.1 Unit Tests
 
-**Current:** Basic test project exists (`PDFEditor.Tests`)
+**Current:** 97 passing tests across 9 test files
 
-**Required:**
-- [ ] Core service tests (PDF operations, export, OCR)
-- [ ] View model tests
+**Completed:**
+- [x] Core service tests: PdfOperations, PdfSearchService, PdfSplitService, PdfSecurityService, PdfCropService, PdfWatermarkService, PdfAnnotationService, PdfExportService
+- [x] UndoRedoManager tests
+- [x] ExportProviderRegistry + all 4 providers (Image, Text, HTML, DOCX) tests
+- [x] Test helper: TestPdfGenerator (in-memory PDF generation)
+
+**Remaining:**
+- [ ] View model tests (MainViewModel, DocumentTabViewModel)
 - [ ] Edge case handling tests
 - [ ] Target: 80%+ code coverage for core library
 
@@ -470,5 +531,5 @@ src/PDFEditor.UI/Resources/Icons/
 
 ---
 
-**Last Updated:** February 18, 2026  
+**Last Updated:** February 17, 2026  
 **Maintainer:** Oriol Canillas
