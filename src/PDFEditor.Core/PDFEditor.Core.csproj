@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PDFEditor.Core</AssemblyName>
+    <RootNamespace>PDFEditor.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PDF Libraries -->
+    <PackageReference Include="itext7" Version="7.2.5" />
+    <PackageReference Include="PdfSharp" Version="6.1.1" />
+    <PackageReference Include="Docnet.Core" Version="2.6.0" />
+    
+    <!-- Image Processing -->
+    <PackageReference Include="Magick.NET-Q16-AnyCPU" Version="14.10.2" />
+    
+    <!-- OCR -->
+    <PackageReference Include="Tesseract" Version="5.2.0" />
+    
+    <!-- Utilities -->
+    <PackageReference Include="NLog" Version="5.2.8" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
+  </ItemGroup>
+
+</Project>

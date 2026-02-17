@@ -1,0 +1,87 @@
+# Build results
+bin/
+obj/
+Debug/
+Release/
+*.dll
+*.exe
+*.pdb
+
+# Visual Studio
+.vs/
+.vscode/
+*.sln.docstates
+*.user
+*.userosscache
+*.sln.iml
+.idea/
+
+# Test Results
+TestResults/
+.coverage
+*.trx
+
+# NuGet
+.nuget/
+packages/
+*.nupkg
+*.snupkg
+
+# Rider
+.idea/
+*.sln.iml
+riderModule.iml
+
+# Local environment
+local.settings.json
+appsettings.local.json
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*~
+*.bak
+*.swp
+*.swo
+Thumbs.db
+
+# OS-specific
+.DS_Store
+.DS_Store?
+._*
+._.
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Node (if using npm for frontend tools)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python (for OCR/ML tools)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# IDE Generated files
+.editorconfig
+
+# Dependencies downloaded at runtime
+libs/ghostscript/
+libs/tesseract/
+libs/clawPDF/
+
+# Sample files (can be committed but large files excluded)
+samples/*.pdf
+!samples/test-sample.pdf
+
+# Build artifacts
+publish/
+dist/
+*.ncrunchproject
