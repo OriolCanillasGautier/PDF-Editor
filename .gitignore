@@ -81,7 +81,144 @@ libs/clawPDF/
 samples/*.pdf
 !samples/test-sample.pdf
 
+# User-specific files
+*.suo
+*.user
+*.sln.docstates
+*.userosscache
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+[Bb]in/
+[Oo]bj/
+
+# MSTest test Results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# Compiled files
+*_i.c
+*_p.c
+*_i.h
+*.ilk
+*.meta
+*.obj
+*.pch
+*.pdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*.log
+*.vspscc
+*.vssscc
+*.pidb
+*.svclog
+*.scc
+
+# Visual Studio
+.vs/
+.vscode/
+.builds
+*.DotSettings.user
+*.sln.iml
+
+# Visual C++ cache files
+ipch/
+*.aps
+*.ncb
+*.opensdf
+*.sdf
+*.cachefile
+
+# Visual Studio profiler
+*.psess
+*.vsp
+*.vspx
+
+# ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# Publish
+publish/
+*.Publish.xml
+*.pubxml
+*.azurePubxml
+
+# NuGet
+.nuget/
+packages/
+*.nupkg
+*.snupkg
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Mac
+.DS_Store
+
+# NCrunch
+_NCrunch*
+
+# IDE
+.idea/
+*.sln.iml
+riderModule.iml
+
+# Local environment
+local.settings.json
+appsettings.local.json
+
+# Temporary files
+*~
+*.bak
+*.swp
+*.swo
+*.tmp
+*.temp
+*.log
+
+# Node (if using npm for frontend tools)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python (for OCR/ML tools)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Dependencies downloaded at runtime
+libs/ghostscript/
+libs/tesseract/
+libs/clawPDF/
+
+# Sample files (can be committed but large files excluded)
+samples/*.pdf
+!samples/test-sample.pdf
+
 # Build artifacts
 publish/
 dist/
 *.ncrunchproject
+
+# Installer build artifacts (keep source files, ignore outputs)´
+installer/
+installer/obj/
+installer/*.msi
+installer/msi-install.log

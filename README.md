@@ -5,25 +5,25 @@ A comprehensive, open-source PDF editor built with C# and Avalonia UI, integrati
 ## Features
 
 ### Current (Version 0.0.1)
-- ✅ Multi-library architecture (iText7, PDFSharp, Pdfium.Net)
-- ✅ Avalonia cross-platform UI framework
-- ✅ Modular, extensible design
-- ✅ Dependency injection for loose coupling
+- Multi-library architecture (iText7, PDFSharp, Pdfium.Net)
+- Avalonia cross-platform UI framework
+- Modular, extensible design
+- Dependency injection for loose coupling
 
 ### In Development (MVP)
-- 🔄 PDF viewing and navigation
-- 🔄 Page thumbnail previews
-- 🔄 Text extraction
-- 🔄 Page manipulation (rotation, removal, reordering)
+- PDF viewing and navigation
+- Page thumbnail previews
+- Text extraction
+- Page manipulation (rotation, removal, reordering)
 
 ### Planned
-- 📋 OCR text layer creation (Tesseract/PaddleOCR)
-- 📋 Image conversion (PDF ↔ PNG/JPEG/TIFF)
-- 📋 ClawPDF printer integration
-- 📋 Batch processing
-- 📋 Document encryption
-- 📋 Metadata editing
-- 📋 Command-line interface
+- OCR text layer creation (Tesseract/PaddleOCR)
+- Image conversion (PDF to/from PNG/JPEG/TIFF)
+- ClawPDF printer integration
+- Batch processing
+- Document encryption
+- Metadata editing
+- Command-line interface
 
 ## Technology Stack
 
@@ -193,4 +193,4 @@ This is an open-source project and is provided as-is. Always test thoroughly bef
 
 **Status**: Early Development (v0.0.1)  
 **Last Updated**: February 17, 2026  
-**Maintainer**: @ocanillas
+**Maintainer**: Oriol Canillas
