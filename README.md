@@ -4,7 +4,7 @@ A comprehensive, open-source PDF editor built with C# and Avalonia UI, integrati
 
 ## Features
 
-### Current (Version 1.0.0-alpha)
+### Current (Version 0.0.1)
 
 **PDF Viewing & Editing**
 - Multi-tab document interface with page thumbnails
