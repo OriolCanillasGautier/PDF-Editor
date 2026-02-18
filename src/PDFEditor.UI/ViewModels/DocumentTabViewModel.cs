@@ -13,17 +13,31 @@ using ReactiveUI;
 namespace PDFEditor.UI.ViewModels;
 
 /// <summary>
-/// Represents a single page thumbnail in the sidebar
+/// Represents a single page thumbnail in the sidebar.
+/// Starts as a placeholder (IsLoaded=false) and is rendered lazily in the background.
 /// </summary>
 public class ThumbnailItem : ReactiveObject
 {
     private Bitmap? _image;
+    private bool    _isLoaded;
+
     public int PageNumber { get; set; }
+
+    /// <summary>True once the thumbnail bitmap has been rendered and set.</summary>
+    public bool IsLoaded
+    {
+        get => _isLoaded;
+        set => this.RaiseAndSetIfChanged(ref _isLoaded, value);
+    }
 
     public Bitmap? Image
     {
         get => _image;
-        set => this.RaiseAndSetIfChanged(ref _image, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _image, value);
+            if (value != null) IsLoaded = true;
+        }
     }
 }
 
@@ -55,11 +69,21 @@ public class DocumentTabViewModel : ReactiveObject
     private readonly PdfExportService _exportService = new();
     private readonly PdfAnnotationService _annotationService = new();
     private readonly PdfCropService _cropService = new();
+    private readonly PdfFormService _formService = new();
+    private readonly PdfSignatureService _signatureService = new();
+    private readonly PdfRedactionService _redactionService = new();
+    private readonly PdfComparisonService _comparisonService = new();
+    private readonly AnnotationExportService _annotationExportService = new();
+    private readonly XfdfAnnotationService _xfdfAnnotationService = new();
+    private readonly SearchablePdfService _searchablePdfService = new(new TesseractOcrService());
     private readonly UndoRedoManager _undoRedo = new();
 
     // Thread safety: only one PDF mutation at a time
     private readonly SemaphoreSlim _operationLock = new(1, 1);
     private bool _isBusy;
+
+    // Lazy thumbnail loading cancellation
+    private CancellationTokenSource _thumbnailCts = new();
 
     // PDF state
     private byte[]? _pdfBytes;
@@ -103,6 +127,13 @@ public class DocumentTabViewModel : ReactiveObject
     public PdfSplitService SplitService => _splitService;
     public PdfAnnotationService AnnotationService => _annotationService;
     public PdfCropService CropService => _cropService;
+    public PdfFormService FormService => _formService;
+    public PdfSignatureService SignatureService2 => _signatureService;
+    public PdfRedactionService RedactionService => _redactionService;
+    public PdfComparisonService ComparisonService => _comparisonService;
+    public AnnotationExportService AnnotationExportService => _annotationExportService;
+    public XfdfAnnotationService XfdfAnnotationService => _xfdfAnnotationService;
+    public SearchablePdfService SearchablePdfService => _searchablePdfService;
 
     #region Properties
 
@@ -709,6 +740,20 @@ public class DocumentTabViewModel : ReactiveObject
         Log.Debug("Recorded action: {Description} (undo stack: {UndoCount})", description, _undoRedo.UndoCount);
     }
 
+    /// <summary>
+    /// Public method to update the PDF bytes with undo support and refresh the view.
+    /// Used by UI event handlers for form operations, signatures, etc.
+    /// </summary>
+    public void UpdatePdfBytes(byte[] newBytes, string description)
+    {
+        RecordAndApply(description, newBytes);
+        PageCount = _renderService.GetPageCount(_pdfBytes);
+        RenderCurrentPage();
+        LoadThumbnails();
+        UpdatePageInfo();
+        StatusText = description;
+    }
+
     private void RaiseUndoRedoChanged()
     {
         this.RaisePropertyChanged(nameof(CanUndo));
@@ -1135,41 +1180,161 @@ public class DocumentTabViewModel : ReactiveObject
         }
     }
 
+    /// <summary>
+    /// Lazily loads all page thumbnails in the background.
+    /// Immediately populates the Thumbnails list with unrendered placeholders so the
+    /// sidebar appears instantly, then renders thumbs progressively starting from
+    /// the current page and radiating outward.
+    /// </summary>
     private void LoadThumbnails()
     {
         if (_pdfBytes == null) return;
+
+        // Cancel any in-flight render job
+        _thumbnailCts.Cancel();
+        _thumbnailCts.Dispose();
+        _thumbnailCts = new CancellationTokenSource();
+        var ct = _thumbnailCts.Token;
+
+        // Step 1: Populate placeholder items synchronously — instant sidebar
+        int count = _pageCount;
         Thumbnails.Clear();
-        for (int i = 0; i < _pageCount; i++)
+        for (int i = 0; i < count; i++)
+            Thumbnails.Add(new ThumbnailItem { PageNumber = i + 1 });
+
+        // Step 2: Render in background, starting from the current page and radiating out
+        int startIndex = Math.Max(0, _currentPageIndex);
+        var pdfBytes = _pdfBytes; // capture local ref
+
+        Task.Run(async () =>
         {
-            try
+            // Build priority render order: current page first, then alternating outward
+            var order = BuildRadiatingOrder(startIndex, count);
+
+            foreach (int idx in order)
             {
-                var (pixels, width, height) = _renderService.RenderThumbnail(_pdfBytes, i);
-                Thumbnails.Add(new ThumbnailItem
+                if (ct.IsCancellationRequested) return;
+
+                try
                 {
-                    PageNumber = i + 1,
-                    Image = BitmapHelper.CreateBitmapFromBgra(pixels, width, height)
-                });
+                    var (pixels, width, height) = _renderService.RenderThumbnail(pdfBytes, idx);
+                    var bitmap = BitmapHelper.CreateBitmapFromBgra(pixels, width, height);
+
+                    if (ct.IsCancellationRequested) return;
+
+                    int capturedIdx = idx;
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (capturedIdx < Thumbnails.Count)
+                            Thumbnails[capturedIdx].Image = bitmap;
+                    }, DispatcherPriority.Background);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    Log.Warn(ex, "Failed to render thumbnail for page {Page}", idx + 1);
+                }
             }
-            catch (Exception ex)
-            {
-                Log.Warn(ex, "Failed to render thumbnail for page {Page}", i + 1);
-                Thumbnails.Add(new ThumbnailItem { PageNumber = i + 1 });
-            }
+        }, ct);
+    }
+
+    /// <summary>
+    /// Produces page indices in radiating order from startIndex:
+    /// startIndex, startIndex-1, startIndex+1, startIndex-2, startIndex+2, …
+    /// </summary>
+    private static IEnumerable<int> BuildRadiatingOrder(int start, int count)
+    {
+        if (count <= 0) yield break;
+        start = Math.Clamp(start, 0, count - 1);
+
+        yield return start;
+        for (int delta = 1; delta < count; delta++)
+        {
+            int hi = start + delta;
+            int lo = start - delta;
+            if (lo >= 0) yield return lo;
+            if (hi < count) yield return hi;
         }
+    }
+
+    /// <summary>
+    /// Called when the visible thumbnail range changes (e.g., user scrolls).
+    /// Re-runs background loading prioritizing visible items that haven't loaded yet.
+    /// </summary>
+    public void NotifyVisibleThumbnails(int firstVisible, int lastVisible)
+    {
+        if (_pdfBytes == null || Thumbnails.Count == 0) return;
+
+        // Check whether any visible thumbnails are still unloaded
+        bool anyUnloaded = false;
+        for (int i = firstVisible; i <= Math.Min(lastVisible, Thumbnails.Count - 1); i++)
+        {
+            if (!Thumbnails[i].IsLoaded) { anyUnloaded = true; break; }
+        }
+        if (!anyUnloaded) return;
+
+        // Restart background loader prioritizing visible range midpoint
+        int midpoint = (firstVisible + lastVisible) / 2;
+        _thumbnailCts.Cancel();
+        _thumbnailCts.Dispose();
+        _thumbnailCts = new CancellationTokenSource();
+        var ct = _thumbnailCts.Token;
+        int count = _pageCount;
+        var pdfBytes = _pdfBytes;
+
+        Task.Run(async () =>
+        {
+            var order = BuildRadiatingOrder(midpoint, count);
+            foreach (int idx in order)
+            {
+                if (ct.IsCancellationRequested) return;
+                if (idx < Thumbnails.Count && Thumbnails[idx].IsLoaded) continue;
+
+                try
+                {
+                    var (pixels, width, height) = _renderService.RenderThumbnail(pdfBytes, idx);
+                    var bitmap = BitmapHelper.CreateBitmapFromBgra(pixels, width, height);
+                    if (ct.IsCancellationRequested) return;
+
+                    int capturedIdx = idx;
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (capturedIdx < Thumbnails.Count && !Thumbnails[capturedIdx].IsLoaded)
+                            Thumbnails[capturedIdx].Image = bitmap;
+                    }, DispatcherPriority.Background);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    Log.Warn(ex, "Failed to render thumbnail for page {Page}", idx + 1);
+                }
+            }
+        }, ct);
     }
 
     private void UpdateThumbnail(int pageIndex)
     {
         if (_pdfBytes == null || pageIndex < 0 || pageIndex >= Thumbnails.Count) return;
-        try
+        var pdfBytes    = _pdfBytes;
+        int capturedIdx = pageIndex;
+
+        Task.Run(async () =>
         {
-            var (pixels, width, height) = _renderService.RenderThumbnail(_pdfBytes, pageIndex);
-            Thumbnails[pageIndex].Image = BitmapHelper.CreateBitmapFromBgra(pixels, width, height);
-        }
-        catch (Exception ex)
-        {
-            Log.Warn(ex, "Failed to update thumbnail for page {Page}", pageIndex + 1);
-        }
+            try
+            {
+                var (pixels, width, height) = _renderService.RenderThumbnail(pdfBytes, capturedIdx);
+                var bitmap = BitmapHelper.CreateBitmapFromBgra(pixels, width, height);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (capturedIdx < Thumbnails.Count)
+                        Thumbnails[capturedIdx].Image = bitmap;
+                }, DispatcherPriority.Background);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(ex, "Failed to update thumbnail for page {Page}", capturedIdx + 1);
+            }
+        });
     }
 
     private void LoadMetadata()

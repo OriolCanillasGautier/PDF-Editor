@@ -168,6 +168,76 @@ public class ExportProviderRegistryTests
         Assert.Equal("test.docx", result.FileName);
     }
 
+    #region XLSX and RTF Export Providers
+
+    [Fact]
+    public void CreateDefault_RegistersXlsxProvider()
+    {
+        var registry = ExportProviderRegistry.CreateDefault();
+        var providers = registry.Providers.Select(p => p.FormatName).ToList();
+        Assert.Contains(providers, n => n.Contains("XLSX") || n.Contains("Excel"));
+    }
+
+    [Fact]
+    public void CreateDefault_RegistersRtfProvider()
+    {
+        var registry = ExportProviderRegistry.CreateDefault();
+        var providers = registry.Providers.Select(p => p.FormatName).ToList();
+        Assert.Contains(providers, n => n.Contains("RTF") || n.Contains("Rich Text"));
+    }
+
+    [Fact]
+    public void GetProvidersByExtension_Xlsx_ReturnsProvider()
+    {
+        var registry = ExportProviderRegistry.CreateDefault();
+        var providers = registry.GetProvidersByExtension(".xlsx").ToList();
+        Assert.NotEmpty(providers);
+    }
+
+    [Fact]
+    public void GetProvidersByExtension_Rtf_ReturnsProvider()
+    {
+        var registry = ExportProviderRegistry.CreateDefault();
+        var providers = registry.GetProvidersByExtension(".rtf").ToList();
+        Assert.NotEmpty(providers);
+    }
+
+    [Fact]
+    public async Task XlsxExportProvider_ExportAsync_ProducesXlsxFile()
+    {
+        var provider = new XlsxExportProvider();
+        var pdf = TestPdfGenerator.CreatePdfWithContent("Column1\tColumn2\nValue1\tValue2");
+        var options = new ExportOptions { BaseFileName = "test" };
+        var result = await provider.ExportAsync(pdf, options);
+        Assert.True(result.Success);
+        Assert.True(result.Data.Length > 0);
+        Assert.Equal("test.xlsx", result.FileName);
+    }
+
+    [Fact]
+    public async Task RtfExportProvider_ExportAsync_ProducesRtfFile()
+    {
+        var provider = new RtfExportProvider();
+        var pdf = TestPdfGenerator.CreatePdfWithContent("RTF export test");
+        var options = new ExportOptions { BaseFileName = "test" };
+        var result = await provider.ExportAsync(pdf, options);
+        Assert.True(result.Success);
+        Assert.True(result.Data.Length > 0);
+        Assert.Equal("test.rtf", result.FileName);
+        var rtf = System.Text.Encoding.UTF8.GetString(result.Data);
+        Assert.StartsWith("{\\rtf1", rtf);
+    }
+
+    [Fact]
+    public void CreateDefault_RegistersSixOrMoreProviders()
+    {
+        var registry = ExportProviderRegistry.CreateDefault();
+        Assert.True(registry.Providers.Count >= 6,
+            $"Expected at least 6 providers, got {registry.Providers.Count}");
+    }
+
+    #endregion
+
     /// <summary>
     /// Dummy provider for testing registration
     /// </summary>

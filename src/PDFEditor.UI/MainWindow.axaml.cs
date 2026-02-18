@@ -823,7 +823,7 @@ public partial class MainWindow : Window
             var dialog = new Window
             {
                 Title = "Export Document",
-                Width = 480, Height = 420,
+                Width = 480, Height = 500,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 CanResize = false
             };
@@ -837,9 +837,38 @@ public partial class MainWindow : Window
             foreach (var p in registry.Providers)
                 formatCombo.Items.Add(new ComboBoxItem { Content = p.FormatName, Tag = p });
 
-            var dpiInput = new TextBox { Text = "150", Watermark = "DPI", Margin = new Thickness(10, 5) };
-            var qualityInput = new TextBox { Text = "90", Watermark = "Quality (1-100)", Margin = new Thickness(10, 5) };
+            var dpiInput = new TextBox { Text = "150", Watermark = "DPI (e.g. 150)", Margin = new Thickness(10, 5) };
+            var qualityInput = new TextBox { Text = "90", Watermark = "JPEG quality (1-100)", Margin = new Thickness(10, 5) };
             var pageRangeInput = new TextBox { Watermark = $"Page range (e.g. 1-{Tab.PageCount}) or leave blank for all", Margin = new Thickness(10, 5) };
+
+            // Image-quality settings panel — only visible for raster image export formats
+            var imageDpiPanel = new StackPanel();
+            imageDpiPanel.Children.Add(new TextBlock
+            {
+                Text = "Image Settings",
+                FontSize = 13,
+                FontWeight = FontWeight.SemiBold,
+                Margin = new Thickness(10, 10, 10, 0)
+            });
+            imageDpiPanel.Children.Add(dpiInput);
+            imageDpiPanel.Children.Add(qualityInput);
+
+            static bool FormatUsesImageQuality(PDFEditor.Core.Abstractions.IExportProvider p)
+            {
+                var imgExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp" };
+                return p.SupportedExtensions.Any(e => imgExts.Contains(e));
+            }
+
+            // Set initial panel visibility
+            var firstProvider = registry.Providers.FirstOrDefault();
+            imageDpiPanel.IsVisible = firstProvider != null && FormatUsesImageQuality(firstProvider);
+
+            formatCombo.SelectionChanged += (_, _) =>
+            {
+                if (formatCombo.SelectedItem is ComboBoxItem { Tag: PDFEditor.Core.Abstractions.IExportProvider sp })
+                    imageDpiPanel.IsVisible = FormatUsesImageQuality(sp);
+            };
 
             var statusLabel = new TextBlock { Text = "", FontSize = 11, Opacity = 0.6, Margin = new Thickness(10, 5), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
             var progressBar = new ProgressBar { Minimum = 0, Maximum = 100, IsVisible = false, Margin = new Thickness(10, 5) };
@@ -962,9 +991,8 @@ public partial class MainWindow : Window
                 {
                     new TextBlock { Text = "Export Format", FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(10, 10, 10, 0) },
                     formatCombo,
-                    new TextBlock { Text = "Settings", FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(10, 10, 10, 0) },
-                    dpiInput,
-                    qualityInput,
+                    imageDpiPanel,
+                    new TextBlock { Text = "Page Range", FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(10, 10, 10, 0) },
                     pageRangeInput,
                     new Separator { Margin = new Thickness(10, 8) },
                     progressBar,
@@ -2724,6 +2752,132 @@ public partial class MainWindow : Window
 
     #endregion
 
+    #region Searchable PDF
+
+    private async void OnMakeSearchablePdfClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded || Tab.PdfBytes == null) return;
+        try
+        {
+            var ocrService = Tab.SearchablePdfService;
+
+            // Language selector
+            var langCombo = new ComboBox { Width = 200 };
+            var tesseract = new PDFEditor.Core.Services.TesseractOcrService();
+            var languages = tesseract.GetSupportedLanguages();
+            if (languages.Count == 0) languages.Add("eng");
+            foreach (var lang in languages) langCombo.Items.Add(lang);
+            langCombo.SelectedIndex = languages.IndexOf("eng") >= 0 ? languages.IndexOf("eng") : 0;
+
+            // DPI selector
+            var dpiCombo = new ComboBox { Width = 200 };
+            foreach (var d in new[] { 150, 200, 300, 400 }) dpiCombo.Items.Add(d);
+            dpiCombo.SelectedIndex = 2; // 300
+
+            // Check image-based pages
+            var (imageBased, total) = ocrService.CountImageBasedPages(Tab.PdfBytes);
+            var infoText = new TextBlock
+            {
+                Text = $"This document has {total} page(s), {imageBased} appear to be image-based (no text layer).",
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                Margin = new Thickness(0, 5)
+            };
+
+            var progressBar = new ProgressBar { Minimum = 0, Maximum = 100, IsVisible = false, Height = 20 };
+            var statusLabel = new TextBlock { Text = "Ready", Foreground = Avalonia.Media.Brushes.Gray };
+
+            var runBtn = new Button { Content = "Make Searchable", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+
+            var dialog = new Window
+            {
+                Title = "Make Searchable PDF (OCR)",
+                Width = 450, Height = 350,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                CanResize = false
+            };
+
+            runBtn.Click += async (_, _) =>
+            {
+                var lang = langCombo.SelectedItem?.ToString() ?? "eng";
+                var dpi = (int)(dpiCombo.SelectedItem ?? 300);
+
+                statusLabel.Text = "Making PDF searchable... this may take a while.";
+                runBtn.IsEnabled = false;
+                progressBar.IsVisible = true;
+
+                try
+                {
+                    var progress = new Progress<(int current, int total)>(p =>
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            progressBar.Value = (double)p.current / p.total * 100;
+                            statusLabel.Text = $"Processing page {p.current} of {p.total}...";
+                        });
+                    });
+
+                    var resultBytes = await ocrService.MakeSearchableAsync(Tab.PdfBytes, lang, dpi, progress);
+
+                    // Ask user where to save
+                    var sp = this.StorageProvider;
+                    var file = await sp.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+                    {
+                        Title = "Save Searchable PDF",
+                        DefaultExtension = "pdf",
+                        FileTypeChoices = new[]
+                        {
+                            new Avalonia.Platform.Storage.FilePickerFileType("PDF Files") { Patterns = new[] { "*.pdf" } }
+                        },
+                        SuggestedFileName = IOPath.GetFileNameWithoutExtension(Tab.FilePath ?? "document") + "_searchable.pdf"
+                    });
+
+                    if (file != null)
+                    {
+                        var path = file.Path.LocalPath;
+                        await File.WriteAllBytesAsync(path, resultBytes);
+                        statusLabel.Text = $"Searchable PDF saved to: {IOPath.GetFileName(path)}";
+                        progressBar.Value = 100;
+                    }
+                    else
+                    {
+                        statusLabel.Text = "Save cancelled.";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    statusLabel.Text = $"Failed: {ex.Message}";
+                    Log.Error(ex, "Make searchable PDF failed");
+                }
+                finally { runBtn.IsEnabled = true; }
+            };
+
+            dialog.Content = new ScrollViewer
+            {
+                Content = new StackPanel
+                {
+                    Margin = new Thickness(20),
+                    Spacing = 8,
+                    Children =
+                    {
+                        new TextBlock { Text = "Make Searchable PDF", FontWeight = FontWeight.Bold, FontSize = 16 },
+                        infoText,
+                        new TextBlock { Text = "Language:", FontWeight = FontWeight.SemiBold },
+                        langCombo,
+                        new TextBlock { Text = "DPI:", FontWeight = FontWeight.SemiBold },
+                        dpiCombo,
+                        runBtn,
+                        progressBar,
+                        statusLabel
+                    }
+                }
+            };
+            await dialog.ShowDialog(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Make searchable PDF dialog error"); }
+    }
+
+    #endregion
+
     #region Undo History
 
     private void OnUndoHistoryClick(object? sender, RoutedEventArgs e)
@@ -3018,6 +3172,1566 @@ Annotations: Enable annotation mode, select a tool, draw on page
             }
         };
         w.Show(this);
+    }
+
+    #endregion
+
+    #region Form Fields
+
+    private void OnDetectFormFieldsClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var hasFields = Tab.FormService.HasFormFields(Tab.PdfBytes);
+            if (!hasFields)
+            {
+                ShowInfoDialog("Form Fields", "This PDF does not contain any interactive form fields.");
+                return;
+            }
+            var fields = Tab.FormService.GetFormFields(Tab.PdfBytes);
+            var msg = $"Found {fields.Count} form field(s):\n\n";
+            foreach (var f in fields)
+            {
+                msg += $"  [{f.FieldType}] {f.Name}";
+                if (!string.IsNullOrEmpty(f.Value)) msg += $" = \"{f.Value}\"";
+                msg += $" (Page {f.PageIndex + 1})\n";
+            }
+            ShowInfoDialog("Form Fields", msg);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error detecting form fields");
+            ShowInfoDialog("Error", $"Failed to detect form fields: {ex.Message}");
+        }
+    }
+
+    private async void OnFillFormClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        var fields = Tab.FormService.GetFormFields(Tab.PdfBytes);
+        if (fields.Count == 0)
+        {
+            ShowInfoDialog("Fill Form", "No form fields found in this document.");
+            return;
+        }
+
+        // Build a dialog with text inputs for each editable field
+        var dialog = new Window
+        {
+            Title = "Fill Form Fields",
+            Width = 500,
+            MinHeight = 300,
+            MaxHeight = 700,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = BuildFillFormPanel(fields)
+        };
+        await dialog.ShowDialog(this);
+    }
+
+    private StackPanel BuildFillFormPanel(List<PDFEditor.Core.Abstractions.FormFieldInfo> fields)
+    {
+        var panel = new StackPanel { Margin = new Thickness(15), Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = "Fill Form Fields", FontSize = 16, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
+
+        var fieldInputs = new Dictionary<string, Control>();
+        var scroll = new ScrollViewer { MaxHeight = 450 };
+        var inner = new StackPanel { Spacing = 6 };
+
+        foreach (var f in fields)
+        {
+            if (f.IsReadOnly) continue;
+
+            inner.Children.Add(new TextBlock
+            {
+                Text = $"{f.Name} ({f.FieldType})",
+                FontSize = 11,
+                Opacity = 0.7,
+                Margin = new Thickness(0, 4, 0, 0)
+            });
+
+            if (f.FieldType == PDFEditor.Core.Abstractions.FormFieldType.Checkbox)
+            {
+                var cb = new CheckBox { IsChecked = f.IsChecked, Content = f.Name };
+                fieldInputs[f.Name] = cb;
+                inner.Children.Add(cb);
+            }
+            else if (f.FieldType == PDFEditor.Core.Abstractions.FormFieldType.Dropdown && f.Options.Count > 0)
+            {
+                var combo = new ComboBox { ItemsSource = f.Options, SelectedItem = f.Value };
+                if (combo.SelectedIndex < 0) combo.SelectedIndex = 0;
+                fieldInputs[f.Name] = combo;
+                inner.Children.Add(combo);
+            }
+            else
+            {
+                var tb = new TextBox { Text = f.Value, Padding = new Thickness(4, 2) };
+                fieldInputs[f.Name] = tb;
+                inner.Children.Add(tb);
+            }
+        }
+
+        scroll.Content = inner;
+        panel.Children.Add(scroll);
+
+        var btnRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
+        var applyBtn = new Button { Content = "Apply", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        applyBtn.Click += (s, e) =>
+        {
+            var values = new Dictionary<string, string>();
+            foreach (var kvp in fieldInputs)
+            {
+                if (kvp.Value is TextBox tb) values[kvp.Key] = tb.Text ?? "";
+                else if (kvp.Value is CheckBox cb) values[kvp.Key] = (cb.IsChecked == true) ? "true" : "false";
+                else if (kvp.Value is ComboBox combo) values[kvp.Key] = combo.SelectedItem?.ToString() ?? "";
+            }
+            try
+            {
+                var newBytes = Tab!.FormService.FillForm(Tab.PdfBytes!, values);
+                Tab.UpdatePdfBytes(newBytes, "Fill Form");
+                ShowInfoDialog("Fill Form", $"Filled {values.Count} field(s) successfully.");
+            }
+            catch (Exception ex)
+            {
+                ShowInfoDialog("Error", $"Failed to fill form: {ex.Message}");
+            }
+            ((Window)((Control)s!).Parent!.Parent!).Close();
+        };
+        btnRow.Children.Add(applyBtn);
+        panel.Children.Add(btnRow);
+        return panel;
+    }
+
+    private void OnFlattenFormClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var newBytes = Tab.FormService.FlattenForm(Tab.PdfBytes);
+            Tab.UpdatePdfBytes(newBytes, "Flatten Form");
+            ShowInfoDialog("Flatten Form", "Form fields have been flattened into static content.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Failed to flatten form: {ex.Message}");
+        }
+    }
+
+    private async void OnExportFormDataClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        var result = Tab.FormService.ExportFormData(Tab.PdfBytes);
+        if (!result.Success || result.FieldValues.Count == 0)
+        {
+            ShowInfoDialog("Export Form Data", result.ErrorMessage ?? "No form data to export.");
+            return;
+        }
+
+        var sp = this.StorageProvider;
+        var file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export Form Data",
+            DefaultExtension = "json",
+            FileTypeChoices = new[] { new FilePickerFileType("JSON") { Patterns = new[] { "*.json" } } },
+            SuggestedFileName = IOPath.GetFileNameWithoutExtension(Tab.FilePath ?? "form") + "_data.json"
+        });
+        if (file == null) return;
+
+        var json = Newtonsoft.Json.JsonConvert.SerializeObject(result.FieldValues, Newtonsoft.Json.Formatting.Indented);
+        await File.WriteAllTextAsync(file.Path.LocalPath, json);
+        ShowInfoDialog("Export Form Data", $"Exported {result.FieldValues.Count} field(s) to JSON.");
+    }
+
+    private async void OnImportFormDataClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        var sp = this.StorageProvider;
+        var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import Form Data (JSON)",
+            AllowMultiple = false,
+            FileTypeFilter = new[] { new FilePickerFileType("JSON") { Patterns = new[] { "*.json" } } }
+        });
+        if (files == null || files.Count == 0) return;
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(files[0].Path.LocalPath);
+            var data = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+            if (data == null || data.Count == 0)
+            {
+                ShowInfoDialog("Import Form Data", "No valid field data found in the JSON file.");
+                return;
+            }
+            var newBytes = Tab.FormService.ImportFormData(Tab.PdfBytes, data);
+            Tab.UpdatePdfBytes(newBytes, "Import Form Data");
+            ShowInfoDialog("Import Form Data", $"Imported {data.Count} field value(s).");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Failed to import form data: {ex.Message}");
+        }
+    }
+
+    private void OnAddTextFieldClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var fieldName = $"TextField_{DateTime.Now:HHmmss}";
+            var newBytes = Tab.FormService.AddTextField(Tab.PdfBytes, Tab.CurrentPageIndex, fieldName, 50, 700, 200, 20, "");
+            Tab.UpdatePdfBytes(newBytes, "Add Text Field");
+            ShowInfoDialog("Add Field", $"Added text field \"{fieldName}\" at page {Tab.CurrentPageIndex + 1}.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Failed to add text field: {ex.Message}");
+        }
+    }
+
+    private void OnAddCheckboxFieldClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var fieldName = $"Checkbox_{DateTime.Now:HHmmss}";
+            var newBytes = Tab.FormService.AddCheckboxField(Tab.PdfBytes, Tab.CurrentPageIndex, fieldName, 50, 700, 15, 15);
+            Tab.UpdatePdfBytes(newBytes, "Add Checkbox");
+            ShowInfoDialog("Add Field", $"Added checkbox \"{fieldName}\" at page {Tab.CurrentPageIndex + 1}.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Failed to add checkbox: {ex.Message}");
+        }
+    }
+
+    private void OnAddDropdownFieldClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var fieldName = $"Dropdown_{DateTime.Now:HHmmss}";
+            var options = new[] { "Option 1", "Option 2", "Option 3" };
+            var newBytes = Tab.FormService.AddDropdownField(Tab.PdfBytes, Tab.CurrentPageIndex, fieldName, 50, 700, 150, 20, options);
+            Tab.UpdatePdfBytes(newBytes, "Add Dropdown");
+            ShowInfoDialog("Add Field", $"Added dropdown \"{fieldName}\" at page {Tab.CurrentPageIndex + 1}.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Failed to add dropdown: {ex.Message}");
+        }
+    }
+
+    private void OnAddRadioButtonFieldClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        var dialog = new Window
+        {
+            Title = "Add Radio Button Group",
+            Width = 400, Height = 340,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(15), Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = "Add Radio Button Group", FontSize = 16, FontWeight = FontWeight.SemiBold });
+
+        panel.Children.Add(new TextBlock { Text = "Group Name:", FontSize = 12, Margin = new Thickness(0, 8, 0, 0) });
+        var nameBox = new TextBox { Text = $"RadioGroup_{DateTime.Now:HHmmss}", Padding = new Thickness(4, 2) };
+        panel.Children.Add(nameBox);
+
+        panel.Children.Add(new TextBlock { Text = "Options (one per line):", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
+        var optionsBox = new TextBox
+        {
+            AcceptsReturn = true, Height = 100,
+            Text = "Option 1\nOption 2\nOption 3",
+            Padding = new Thickness(4, 2)
+        };
+        panel.Children.Add(optionsBox);
+
+        var addBtn = new Button { Content = "Add", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        addBtn.Click += (s, ev) =>
+        {
+            try
+            {
+                var groupName = nameBox.Text?.Trim() ?? "RadioGroup";
+                var options = (optionsBox.Text ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(o => o.Trim()).Where(o => o.Length > 0).ToArray();
+                if (options.Length < 2)
+                {
+                    ShowInfoDialog("Error", "Please enter at least 2 options.");
+                    return;
+                }
+                var newBytes = Tab.FormService.AddRadioButtonField(Tab.PdfBytes, Tab.CurrentPageIndex, groupName, 50, 700, 15, 15, options);
+                Tab.UpdatePdfBytes(newBytes, "Add Radio Button Group");
+                dialog.Close();
+                ShowInfoDialog("Add Field", $"Added radio button group \"{groupName}\" with {options.Length} options on page {Tab.CurrentPageIndex + 1}.");
+            }
+            catch (Exception ex)
+            {
+                ShowInfoDialog("Error", $"Failed to add radio button group: {ex.Message}");
+            }
+        };
+        panel.Children.Add(addBtn);
+
+        dialog.Content = panel;
+        dialog.Show(this);
+    }
+
+    private void OnAddSignatureFieldClick2(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var fieldName = $"Signature_{DateTime.Now:HHmmss}";
+            var newBytes = Tab.FormService.AddSignatureField(Tab.PdfBytes, Tab.CurrentPageIndex, fieldName, 50, 50, 200, 80);
+            Tab.UpdatePdfBytes(newBytes, "Add Signature Field (Form)");
+            ShowInfoDialog("Add Field", $"Added signature form field \"{fieldName}\" on page {Tab.CurrentPageIndex + 1}.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Failed to add signature field: {ex.Message}");
+        }
+    }
+
+    private void OnEditFieldPropertiesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        var fields = Tab.FormService.GetFormFields(Tab.PdfBytes);
+        if (fields.Count == 0)
+        {
+            ShowInfoDialog("Field Properties", "No form fields found in this document.");
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Title = "Edit Form Field Properties",
+            Width = 500, Height = 500,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var mainPanel = new StackPanel { Margin = new Thickness(15), Spacing = 8 };
+        mainPanel.Children.Add(new TextBlock { Text = "Edit Form Field Properties", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        mainPanel.Children.Add(new TextBlock { Text = $"Found {fields.Count} form field(s). Select a field to edit:", FontSize = 12, Opacity = 0.7 });
+
+        var fieldCombo = new ComboBox { MinWidth = 300 };
+        foreach (var f in fields)
+            fieldCombo.Items.Add($"{f.Name} ({f.FieldType})");
+        if (fields.Count > 0) fieldCombo.SelectedIndex = 0;
+        mainPanel.Children.Add(fieldCombo);
+
+        var propsPanel = new StackPanel { Spacing = 6, Margin = new Thickness(0, 10, 0, 0) };
+
+        var readOnlyCb = new CheckBox { Content = "Read Only" };
+        var requiredCb = new CheckBox { Content = "Required" };
+        propsPanel.Children.Add(readOnlyCb);
+        propsPanel.Children.Add(requiredCb);
+
+        propsPanel.Children.Add(new TextBlock { Text = "Default Value:", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
+        var defaultValueBox = new TextBox { Padding = new Thickness(4, 2) };
+        propsPanel.Children.Add(defaultValueBox);
+
+        mainPanel.Children.Add(propsPanel);
+
+        // Update props when field selection changes
+        void UpdatePropsDisplay()
+        {
+            if (fieldCombo.SelectedIndex >= 0 && fieldCombo.SelectedIndex < fields.Count)
+            {
+                var f = fields[fieldCombo.SelectedIndex];
+                readOnlyCb.IsChecked = f.IsReadOnly;
+                requiredCb.IsChecked = f.IsRequired;
+                defaultValueBox.Text = f.DefaultValue;
+            }
+        }
+        UpdatePropsDisplay();
+        fieldCombo.SelectionChanged += (s, ev) => UpdatePropsDisplay();
+
+        var btnRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
+        var applyBtn = new Button { Content = "Apply", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        applyBtn.Click += (s, ev) =>
+        {
+            if (fieldCombo.SelectedIndex < 0 || fieldCombo.SelectedIndex >= fields.Count) return;
+            try
+            {
+                var f = fields[fieldCombo.SelectedIndex];
+                var newBytes = Tab.FormService.SetFieldProperties(
+                    Tab.PdfBytes, f.Name,
+                    readOnlyCb.IsChecked,
+                    requiredCb.IsChecked,
+                    defaultValueBox.Text);
+                Tab.UpdatePdfBytes(newBytes, $"Edit Field Properties: {f.Name}");
+                dialog.Close();
+                ShowInfoDialog("Field Properties", $"Updated properties for field \"{f.Name}\".");
+            }
+            catch (Exception ex)
+            {
+                ShowInfoDialog("Error", $"Failed to update field: {ex.Message}");
+            }
+        };
+        btnRow.Children.Add(applyBtn);
+
+        var cancelBtn = new Button { Content = "Cancel", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        cancelBtn.Click += (s, ev) => dialog.Close();
+        btnRow.Children.Add(cancelBtn);
+
+        mainPanel.Children.Add(btnRow);
+        dialog.Content = mainPanel;
+        dialog.Show(this);
+    }
+
+    #endregion
+
+    #region Digital Signatures
+
+    private async void OnSignDocumentClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        // Pick certificate file
+        var sp = this.StorageProvider;
+        var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select Certificate File (PFX/P12)",
+            AllowMultiple = false,
+            FileTypeFilter = new[] { new FilePickerFileType("Certificate") { Patterns = new[] { "*.pfx", "*.p12" } } }
+        });
+        if (files == null || files.Count == 0) return;
+
+        var certPath = files[0].Path.LocalPath;
+
+        // Show signing options dialog
+        var dialog = new Window
+        {
+            Title = "Sign Document",
+            Width = 420,
+            Height = 380,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(15), Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = "Sign PDF Document", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        panel.Children.Add(new TextBlock { Text = $"Certificate: {IOPath.GetFileName(certPath)}", FontSize = 11, Opacity = 0.6 });
+
+        panel.Children.Add(new TextBlock { Text = "Certificate Password:", FontSize = 11, Margin = new Thickness(0, 8, 0, 0) });
+        var pwdBox = new TextBox { PasswordChar = '*', Padding = new Thickness(4, 2) };
+        panel.Children.Add(pwdBox);
+
+        panel.Children.Add(new TextBlock { Text = "Reason:", FontSize = 11, Margin = new Thickness(0, 4, 0, 0) });
+        var reasonBox = new TextBox { Padding = new Thickness(4, 2), Text = "Document approval" };
+        panel.Children.Add(reasonBox);
+
+        panel.Children.Add(new TextBlock { Text = "Location:", FontSize = 11, Margin = new Thickness(0, 4, 0, 0) });
+        var locationBox = new TextBox { Padding = new Thickness(4, 2) };
+        panel.Children.Add(locationBox);
+
+        var visibleCb = new CheckBox { Content = "Visible signature", IsChecked = true, Margin = new Thickness(0, 8, 0, 0) };
+        panel.Children.Add(visibleCb);
+
+        var signBtn = new Button { Content = "Sign", MinWidth = 100, HorizontalContentAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
+        signBtn.Click += (s2, e2) =>
+        {
+            try
+            {
+                var options = new PDFEditor.Core.Abstractions.SigningOptions
+                {
+                    CertificatePath = certPath,
+                    CertificatePassword = pwdBox.Text ?? "",
+                    Reason = reasonBox.Text ?? "",
+                    Location = locationBox.Text ?? "",
+                    PageIndex = Tab.CurrentPageIndex,
+                    IsVisible = visibleCb.IsChecked == true,
+                    X = 50, Y = 50, Width = 200, Height = 80
+                };
+                var signed = Tab.SignatureService2.SignDocument(Tab.PdfBytes!, options);
+                Tab.UpdatePdfBytes(signed, "Sign Document");
+                dialog.Close();
+                ShowInfoDialog("Sign Document", "Document signed successfully.");
+            }
+            catch (Exception ex)
+            {
+                ShowInfoDialog("Error", $"Signing failed: {ex.Message}");
+            }
+        };
+        panel.Children.Add(signBtn);
+
+        dialog.Content = panel;
+        await dialog.ShowDialog(this);
+    }
+
+    private void OnVerifySignaturesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var sigs = Tab.SignatureService2.VerifySignatures(Tab.PdfBytes);
+            if (sigs.Count == 0)
+            {
+                ShowInfoDialog("Verify Signatures", "No digital signatures found in this document.");
+                return;
+            }
+            var msg = $"Found {sigs.Count} signature(s):\n\n";
+            foreach (var s in sigs)
+            {
+                msg += $"  Field: {s.FieldName}\n";
+                msg += $"  Signer: {s.SignerName}\n";
+                msg += $"  Date: {s.SignDate?.ToString("g") ?? "Unknown"}\n";
+                msg += $"  Valid: {(s.IsValid ? "YES" : "NO")} - {s.ValidationMessage}\n";
+                msg += $"  Covers whole doc: {s.CoversWholeDocument}\n\n";
+            }
+            ShowInfoDialog("Verify Signatures", msg);
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Verification failed: {ex.Message}");
+        }
+    }
+
+    private void OnListSignaturesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        var sigs = Tab.SignatureService2.GetSignatures(Tab.PdfBytes);
+        if (sigs.Count == 0)
+        {
+            ShowInfoDialog("Signatures", "No signatures found.");
+            return;
+        }
+        var msg = $"{sigs.Count} signature(s):\n\n";
+        foreach (var s in sigs)
+        {
+            msg += $"  {s.FieldName}: {s.SignerName}";
+            if (!string.IsNullOrEmpty(s.Reason)) msg += $" ({s.Reason})";
+            if (s.SignDate != null) msg += $" on {s.SignDate:g}";
+            msg += "\n";
+        }
+        ShowInfoDialog("Signatures", msg);
+    }
+
+    private void OnAddSignatureFieldClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var fieldName = $"Signature_{DateTime.Now:HHmmss}";
+            var newBytes = Tab.SignatureService2.AddSignatureField(Tab.PdfBytes, Tab.CurrentPageIndex, fieldName, 50, 50, 200, 80);
+            Tab.UpdatePdfBytes(newBytes, "Add Signature Field");
+            ShowInfoDialog("Add Signature Field", $"Added signature field \"{fieldName}\" on page {Tab.CurrentPageIndex + 1}.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Failed to add signature field: {ex.Message}");
+        }
+    }
+
+    private async void OnCertificateManagerClick(object? sender, RoutedEventArgs e)
+    {
+        var certService = new PDFEditor.Core.Services.CertificateManagerService();
+
+        var dialog = new Window
+        {
+            Title = "Certificate Manager",
+            Width = 680,
+            Height = 540,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var mainStack = new StackPanel { Margin = new Thickness(14), Spacing = 8 };
+        mainStack.Children.Add(new TextBlock
+        {
+            Text = "Certificate Manager",
+            FontSize = 16,
+            FontWeight = FontWeight.SemiBold
+        });
+        mainStack.Children.Add(new TextBlock
+        {
+            Text = "Certificates available for digital signing:",
+            FontSize = 11,
+            Opacity = 0.7
+        });
+
+        // Certificate list
+        var certList = new ListBox
+        {
+            Height = 180,
+            Margin = new Thickness(0, 4, 0, 0),
+            SelectionMode = SelectionMode.Single
+        };
+
+        var detailBox = new TextBox
+        {
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            Height = 160,
+            FontFamily = new Avalonia.Media.FontFamily("Cascadia Code,Consolas,Courier New,monospace"),
+            FontSize = 11,
+            Margin = new Thickness(0, 4, 0, 0),
+            Text = "Select a certificate to see details."
+        };
+
+        // Load store certificates
+        var storeCerts = certService.ListStoreCertificates();
+        var allCerts = new List<PDFEditor.Core.Services.CertificateInfo>(storeCerts);
+
+        void RefreshList()
+        {
+            certList.Items.Clear();
+            foreach (var c in allCerts)
+            {
+                var statusMark = c.IsValid ? "✓" : (c.IsExpired ? "✗" : "!");
+                certList.Items.Add($"{statusMark} {c.DisplayName}  —  {c.Source}  (exp. {c.NotAfter:yyyy-MM-dd})");
+            }
+        }
+
+        certList.SelectionChanged += (_, _) =>
+        {
+            var idx = certList.SelectedIndex;
+            if (idx >= 0 && idx < allCerts.Count)
+                detailBox.Text = allCerts[idx].GetSummary();
+        };
+
+        RefreshList();
+
+        // Buttons row
+        var btnPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+        var inspectBtn = new Button { Content = "Inspect PFX File...", Padding = new Thickness(10, 4) };
+        inspectBtn.Click += async (s2, e2) =>
+        {
+            var files = await this.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Select Certificate (PFX/P12)",
+                AllowMultiple = false,
+                FileTypeFilter = new[] { new FilePickerFileType("Certificate") { Patterns = new[] { "*.pfx", "*.p12" } } }
+            });
+            if (files == null || files.Count == 0) return;
+
+            var certPath = files[0].Path.LocalPath;
+
+            // Ask for password
+            var pwdDialog = new Window { Title = "Certificate Password", Width = 320, Height = 160, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var pwdPanel = new StackPanel { Margin = new Thickness(12), Spacing = 8 };
+            pwdPanel.Children.Add(new TextBlock { Text = $"Password for: {IOPath.GetFileName(certPath)}", FontSize = 11 });
+            var pwdBox = new TextBox { PasswordChar = '*', Padding = new Thickness(4, 2) };
+            pwdPanel.Children.Add(pwdBox);
+            var okBtn = new Button { Content = "OK", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 4) };
+            string? pwd = null;
+            okBtn.Click += (_, _) => { pwd = pwdBox.Text ?? ""; pwdDialog.Close(); };
+            pwdPanel.Children.Add(okBtn);
+            pwdDialog.Content = pwdPanel;
+            await pwdDialog.ShowDialog(dialog);
+            if (pwd == null) return;
+
+            var (ok, info, err) = certService.TryInspectCertificateFile(certPath, pwd);
+            if (!ok || info == null)
+            {
+                ShowInfoDialog("Certificate Error", $"Could not read certificate:\n{err}");
+                return;
+            }
+
+            // Add to list if not already present
+            if (!allCerts.Any(c => c.Thumbprint == info.Thumbprint))
+            {
+                allCerts.Add(info);
+                RefreshList();
+            }
+
+            // Select and show details
+            var newIdx = allCerts.FindIndex(c => c.Thumbprint == info.Thumbprint);
+            if (newIdx >= 0) certList.SelectedIndex = newIdx;
+        };
+        btnPanel.Children.Add(inspectBtn);
+
+        var validateBtn = new Button { Content = "Validate Chain", Padding = new Thickness(10, 4) };
+        validateBtn.Click += (_,_) =>
+        {
+            var idx = certList.SelectedIndex;
+            if (idx < 0 || idx >= allCerts.Count) { ShowInfoDialog("Validate", "Select a certificate first."); return; }
+            var cert = allCerts[idx];
+            if (cert.Source != "File" || string.IsNullOrEmpty(cert.FilePath)) { ShowInfoDialog("Validate", "Chain validation requires a PFX file. Select a file-based certificate."); return; }
+
+            var (valid, errors) = certService.ValidateCertificateChain(cert.FilePath, "");
+            var msg = valid ? "Chain builds successfully.\n" : "Chain has issues:\n";
+            if (errors.Length > 0) msg += string.Join("\n", errors.Select(e => $"  • {e}"));
+            ShowInfoDialog("Certificate Chain", msg);
+        };
+        btnPanel.Children.Add(validateBtn);
+
+        var reportBtn = new Button { Content = "Copy Report", Padding = new Thickness(10, 4) };
+        reportBtn.Click += async (_,_) =>
+        {
+            var report = certService.GenerateCertificateReport(allCerts);
+            if (TopLevel.GetTopLevel(this)?.Clipboard != null)
+                await TopLevel.GetTopLevel(this)!.Clipboard!.SetTextAsync(report);
+            ShowInfoDialog("Report", "Certificate report copied to clipboard.");
+        };
+        btnPanel.Children.Add(reportBtn);
+
+        var refreshBtn = new Button { Content = "↺ Refresh Store", Padding = new Thickness(10, 4) };
+        refreshBtn.Click += (_,_) =>
+        {
+            allCerts.Clear();
+            allCerts.AddRange(certService.ListStoreCertificates());
+            RefreshList();
+            detailBox.Text = $"{allCerts.Count} certificate(s) loaded from Windows store.";
+        };
+        btnPanel.Children.Add(refreshBtn);
+
+        mainStack.Children.Add(certList);
+        mainStack.Children.Add(detailBox);
+        mainStack.Children.Add(btnPanel);
+
+        var closeBtn = new Button
+        {
+            Content = "Close",
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Padding = new Thickness(12, 4),
+            Margin = new Thickness(0, 6, 0, 0)
+        };
+        closeBtn.Click += (_,_) => dialog.Close();
+        mainStack.Children.Add(closeBtn);
+
+        dialog.Content = new ScrollViewer { Content = mainStack };
+        await dialog.ShowDialog(this);
+    }
+
+    private void OnAnnotationListClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null) return;
+
+        var annotations = Tab.Annotations;
+        if (annotations.Count == 0)
+        {
+            ShowInfoDialog("Annotations", "No annotations in this document.");
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Title = "Annotation List",
+            Width = 550,
+            Height = 450,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var panel = new DockPanel { Margin = new Thickness(10) };
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"{annotations.Count} Annotation(s)",
+            FontSize = 15, FontWeight = FontWeight.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8),
+            [DockPanel.DockProperty] = Dock.Top
+        });
+
+        var list = new ListBox { Margin = new Thickness(0, 4, 0, 4) };
+        foreach (var ann in annotations)
+        {
+            var label = $"[{ann.Type}] Page {ann.PageIndex + 1}";
+            if (!string.IsNullOrEmpty(ann.Text)) label += $": \"{ann.Text}\"";
+            if (ann.Type == AnnotationType.Stamp) label += $" ({ann.StampPreset})";
+            list.Items.Add(new ListBoxItem { Content = label, Tag = ann });
+        }
+        panel.Children.Add(list);
+
+        var btnRow = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 8,
+            Margin = new Thickness(0, 4, 0, 0),
+            [DockPanel.DockProperty] = Dock.Bottom
+        };
+
+        var goToBtn = new Button { Content = "Go To Page", MinWidth = 90 };
+        goToBtn.Click += (s2, e2) =>
+        {
+            if (list.SelectedItem is ListBoxItem item && item.Tag is PdfAnnotation ann)
+            {
+                Tab.CurrentPageIndex = ann.PageIndex;
+                dialog.Close();
+            }
+        };
+        btnRow.Children.Add(goToBtn);
+
+        var deleteBtn = new Button { Content = "Delete", MinWidth = 70, Foreground = Avalonia.Media.Brushes.OrangeRed };
+        deleteBtn.Click += (s2, e2) =>
+        {
+            if (list.SelectedItem is ListBoxItem item && item.Tag is PdfAnnotation ann)
+            {
+                Tab.Annotations.Remove(ann);
+                list.Items.Remove(item);
+            }
+        };
+        btnRow.Children.Add(deleteBtn);
+
+        panel.Children.Add(btnRow);
+        dialog.Content = panel;
+        dialog.Show(this);
+    }
+
+    private void ShowInfoDialog(string title, string message)
+    {
+        var w = new Window
+        {
+            Title = title,
+            Width = 450,
+            MinHeight = 150,
+            MaxHeight = 600,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new ScrollViewer
+            {
+                Content = new TextBlock
+                {
+                    Text = message,
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                    Margin = new Thickness(15),
+                    FontSize = 13
+                }
+            }
+        };
+        w.Show(this);
+    }
+
+    #endregion
+
+    #region Redaction
+
+    private void OnRedactTextClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        var dialog = new Window
+        {
+            Title = "Redact Text",
+            Width = 420, Height = 220,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(15), Spacing = 10 };
+        panel.Children.Add(new TextBlock { Text = "Redact Text", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        panel.Children.Add(new TextBlock { Text = "Enter text to permanently redact from the document:", FontSize = 12, Opacity = 0.7 });
+
+        var textBox = new TextBox { Watermark = "Text to redact...", Padding = new Thickness(6, 4) };
+        panel.Children.Add(textBox);
+
+        var caseCb = new CheckBox { Content = "Case sensitive", IsChecked = false };
+        panel.Children.Add(caseCb);
+
+        var btnRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 8, 0, 0) };
+        var applyBtn = new Button { Content = "Redact", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        applyBtn.Click += (s, ev) =>
+        {
+            var text = textBox.Text?.Trim();
+            if (string.IsNullOrEmpty(text)) return;
+            try
+            {
+                var targets = Tab.RedactionService.FindRedactionTargets(Tab.PdfBytes, text, caseCb.IsChecked == true);
+                if (targets.Count == 0)
+                {
+                    ShowInfoDialog("Redaction", $"No occurrences of \"{text}\" found in the document.");
+                    return;
+                }
+
+                var newBytes = Tab.RedactionService.RedactText(Tab.PdfBytes, text, caseCb.IsChecked == true);
+                Tab.UpdatePdfBytes(newBytes, $"Redact text: \"{text}\"");
+                dialog.Close();
+                ShowInfoDialog("Redaction", $"Redacted {targets.Count} occurrence(s) of \"{text}\".");
+            }
+            catch (Exception ex)
+            {
+                ShowInfoDialog("Error", $"Redaction failed: {ex.Message}");
+            }
+        };
+        btnRow.Children.Add(applyBtn);
+
+        var cancelBtn = new Button { Content = "Cancel", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        cancelBtn.Click += (s, ev) => dialog.Close();
+        btnRow.Children.Add(cancelBtn);
+
+        panel.Children.Add(btnRow);
+        dialog.Content = panel;
+        dialog.Show(this);
+    }
+
+    private void OnRedactPageClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+        try
+        {
+            var newBytes = Tab.RedactionService.RedactPages(Tab.PdfBytes, new[] { Tab.CurrentPageIndex });
+            Tab.UpdatePdfBytes(newBytes, $"Redact page {Tab.CurrentPageIndex + 1}");
+            ShowInfoDialog("Redaction", $"Page {Tab.CurrentPageIndex + 1} content has been permanently redacted.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Page redaction failed: {ex.Message}");
+        }
+    }
+
+    private void OnFindRedactionTargetsClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        var dialog = new Window
+        {
+            Title = "Find Redaction Targets",
+            Width = 450, Height = 200,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(15), Spacing = 10 };
+        panel.Children.Add(new TextBlock { Text = "Preview text to redact (without applying):", FontSize = 12 });
+
+        var textBox = new TextBox { Watermark = "Text to search...", Padding = new Thickness(6, 4) };
+        panel.Children.Add(textBox);
+
+        var caseCb = new CheckBox { Content = "Case sensitive", IsChecked = false };
+        panel.Children.Add(caseCb);
+
+        var findBtn = new Button { Content = "Find", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
+        findBtn.Click += (s, ev) =>
+        {
+            var text = textBox.Text?.Trim();
+            if (string.IsNullOrEmpty(text)) return;
+            try
+            {
+                var targets = Tab.RedactionService.FindRedactionTargets(Tab.PdfBytes, text, caseCb.IsChecked == true);
+                if (targets.Count == 0)
+                {
+                    ShowInfoDialog("Redaction Preview", $"No occurrences of \"{text}\" found.");
+                }
+                else
+                {
+                    var byPage = targets.GroupBy(t => t.PageIndex + 1);
+                    var msg = $"Found {targets.Count} occurrence(s) of \"{text}\":\n\n";
+                    foreach (var g in byPage.OrderBy(g => g.Key))
+                        msg += $"  Page {g.Key}: {g.Count()} occurrence(s)\n";
+                    msg += "\nUse 'Redact Text...' to permanently remove these.";
+                    ShowInfoDialog("Redaction Preview", msg);
+                }
+                dialog.Close();
+            }
+            catch (Exception ex)
+            {
+                ShowInfoDialog("Error", $"Search failed: {ex.Message}");
+            }
+        };
+        panel.Children.Add(findBtn);
+
+        dialog.Content = panel;
+        dialog.Show(this);
+    }
+
+    #endregion
+
+    #region Document Comparison
+
+    private async void OnCompareDocumentsClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null)
+        {
+            ShowInfoDialog("Compare", "Open a document first to use as the left/baseline document.");
+            return;
+        }
+
+        var dlg = new Avalonia.Platform.Storage.FilePickerOpenOptions
+        {
+            Title = "Select document to compare with...",
+            AllowMultiple = false,
+            FileTypeFilter = new[]
+            {
+                new Avalonia.Platform.Storage.FilePickerFileType("PDF Files") { Patterns = new[] { "*.pdf" } }
+            }
+        };
+
+        var files = await StorageProvider.OpenFilePickerAsync(dlg);
+        if (files == null || files.Count == 0) return;
+
+        try
+        {
+            var rightPath = files[0].Path.LocalPath;
+            var rightBytes = File.ReadAllBytes(rightPath);
+            var leftName = IOPath.GetFileName(Tab.FilePath ?? "Current Document");
+            var rightName = IOPath.GetFileName(rightPath);
+
+            var result = Tab.ComparisonService.Compare(Tab.PdfBytes, rightBytes, leftName, rightName);
+
+            // Show result in a dialog with option to save report
+            var reportDialog = new Window
+            {
+                Title = $"Comparison: {leftName} vs {rightName}",
+                Width = 700, Height = 550,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner
+            };
+
+            var mainPanel = new DockPanel { Margin = new Thickness(10) };
+
+            // Summary header
+            var summaryText = result.AreIdentical
+                ? "Documents are text-identical."
+                : $"{result.TotalDifferences} difference(s): {result.AddedCount} added, {result.RemovedCount} removed, {result.ModifiedCount} modified";
+            var summaryBlock = new TextBlock
+            {
+                Text = summaryText,
+                FontSize = 14, FontWeight = FontWeight.SemiBold,
+                Margin = new Thickness(0, 0, 0, 8),
+                [DockPanel.DockProperty] = Dock.Top
+            };
+            mainPanel.Children.Add(summaryBlock);
+
+            // Report content
+            var reportText = Tab.ComparisonService.GenerateReport(result);
+            var textViewer = new TextBox
+            {
+                Text = reportText,
+                IsReadOnly = true,
+                AcceptsReturn = true,
+                FontFamily = new Avalonia.Media.FontFamily("Consolas, Courier New, monospace"),
+                FontSize = 11,
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap
+            };
+            var scrollViewer = new ScrollViewer { Content = textViewer };
+
+            // Buttons
+            var btnRow = new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Spacing = 8,
+                Margin = new Thickness(0, 8, 0, 0),
+                [DockPanel.DockProperty] = Dock.Bottom
+            };
+
+            var saveTextBtn = new Button { Content = "Save Text Report...", MinWidth = 120 };
+            saveTextBtn.Click += async (s2, e2) =>
+            {
+                var saveDlg = new Avalonia.Platform.Storage.FilePickerSaveOptions
+                {
+                    Title = "Save Comparison Report",
+                    DefaultExtension = "txt",
+                    SuggestedFileName = $"comparison_{leftName}_vs_{rightName}.txt",
+                    FileTypeChoices = new[]
+                    {
+                        new Avalonia.Platform.Storage.FilePickerFileType("Text Files") { Patterns = new[] { "*.txt" } }
+                    }
+                };
+                var saveFile = await StorageProvider.SaveFilePickerAsync(saveDlg);
+                if (saveFile != null)
+                {
+                    await File.WriteAllTextAsync(saveFile.Path.LocalPath, reportText);
+                    ShowInfoDialog("Saved", $"Report saved to {saveFile.Path.LocalPath}");
+                }
+            };
+            btnRow.Children.Add(saveTextBtn);
+
+            var saveHtmlBtn = new Button { Content = "Save HTML Report...", MinWidth = 120 };
+            saveHtmlBtn.Click += async (s2, e2) =>
+            {
+                var htmlReport = Tab.ComparisonService.GenerateHtmlReport(result);
+                var saveDlg = new Avalonia.Platform.Storage.FilePickerSaveOptions
+                {
+                    Title = "Save HTML Comparison Report",
+                    DefaultExtension = "html",
+                    SuggestedFileName = $"comparison_{leftName}_vs_{rightName}.html",
+                    FileTypeChoices = new[]
+                    {
+                        new Avalonia.Platform.Storage.FilePickerFileType("HTML Files") { Patterns = new[] { "*.html" } }
+                    }
+                };
+                var saveFile = await StorageProvider.SaveFilePickerAsync(saveDlg);
+                if (saveFile != null)
+                {
+                    await File.WriteAllTextAsync(saveFile.Path.LocalPath, htmlReport);
+                    ShowInfoDialog("Saved", $"HTML report saved to {saveFile.Path.LocalPath}");
+                }
+            };
+            btnRow.Children.Add(saveHtmlBtn);
+
+            mainPanel.Children.Add(btnRow);
+            mainPanel.Children.Add(scrollViewer);
+
+            reportDialog.Content = mainPanel;
+            reportDialog.Show(this);
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Comparison failed: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region Security / Permissions
+
+    private void OnPermissionManagerClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        var dialog = new Window
+        {
+            Title = "Encrypt & Set Permissions",
+            Width = 440, Height = 420,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(15), Spacing = 10 };
+        panel.Children.Add(new TextBlock { Text = "Encrypt & Set Permissions", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        panel.Children.Add(new TextBlock { Text = "Set passwords, encryption level, and document permissions.", FontSize = 12, Opacity = 0.7 });
+
+        panel.Children.Add(new TextBlock { Text = "Encryption Level:", FontSize = 12, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 4, 0, 0) });
+        var encLevelCombo = new ComboBox { MinWidth = 250 };
+        encLevelCombo.Items.Add("256-bit AES (recommended)");
+        encLevelCombo.Items.Add("128-bit AES");
+        encLevelCombo.SelectedIndex = 0;
+        panel.Children.Add(encLevelCombo);
+
+        panel.Children.Add(new TextBlock { Text = "User Password (to open document):", FontSize = 12, Margin = new Thickness(0, 8, 0, 0) });
+        var userPwBox = new TextBox { Watermark = "(optional - leave empty for no open password)", PasswordChar = '*', Padding = new Thickness(6, 4) };
+        panel.Children.Add(userPwBox);
+
+        panel.Children.Add(new TextBlock { Text = "Owner Password (to change permissions):", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
+        var ownerPwBox = new TextBox { Watermark = "(required)", PasswordChar = '*', Padding = new Thickness(6, 4) };
+        panel.Children.Add(ownerPwBox);
+
+        panel.Children.Add(new TextBlock { Text = "Permissions:", FontSize = 12, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 8, 0, 0) });
+
+        var printCb = new CheckBox { Content = "Allow Printing", IsChecked = true };
+        var copyCb = new CheckBox { Content = "Allow Copy / Text Extraction", IsChecked = true };
+        var editCb = new CheckBox { Content = "Allow Content Editing", IsChecked = false };
+        panel.Children.Add(printCb);
+        panel.Children.Add(copyCb);
+        panel.Children.Add(editCb);
+
+        var btnRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
+        var applyBtn = new Button { Content = "Apply", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        applyBtn.Click += (s, ev) =>
+        {
+            var ownerPw = ownerPwBox.Text?.Trim();
+            if (string.IsNullOrEmpty(ownerPw))
+            {
+                ShowInfoDialog("Error", "Owner password is required.");
+                return;
+            }
+
+            try
+            {
+                var userPw = string.IsNullOrEmpty(userPwBox.Text?.Trim()) ? null : userPwBox.Text!.Trim();
+                var encLevel = encLevelCombo.SelectedIndex == 1
+                    ? PDFEditor.Core.Services.PdfEncryptionLevel.Aes128
+                    : PDFEditor.Core.Services.PdfEncryptionLevel.Aes256;
+                var newBytes = Tab.SecurityService.Encrypt(
+                    Tab.PdfBytes,
+                    userPw,
+                    ownerPw,
+                    printCb.IsChecked == true,
+                    copyCb.IsChecked == true,
+                    editCb.IsChecked == true,
+                    encLevel);
+                Tab.UpdatePdfBytes(newBytes, "Encrypt / Set Permissions");
+                dialog.Close();
+
+                var levelName = encLevel == PDFEditor.Core.Services.PdfEncryptionLevel.Aes128 ? "128-bit AES" : "256-bit AES";
+                var perms = new List<string>();
+                if (printCb.IsChecked == true) perms.Add("Print");
+                if (copyCb.IsChecked == true) perms.Add("Copy");
+                if (editCb.IsChecked == true) perms.Add("Edit");
+                ShowInfoDialog("Encryption", $"Document encrypted with {levelName}.\nUser password: {(userPw != null ? "Set" : "None")}\nPermissions: {string.Join(", ", perms)}");
+            }
+            catch (Exception ex)
+            {
+                ShowInfoDialog("Error", $"Encryption failed: {ex.Message}");
+            }
+        };
+        btnRow.Children.Add(applyBtn);
+
+        var cancelBtn = new Button { Content = "Cancel", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        cancelBtn.Click += (s, ev) => dialog.Close();
+        btnRow.Children.Add(cancelBtn);
+
+        panel.Children.Add(btnRow);
+        dialog.Content = panel;
+        dialog.Show(this);
+    }
+
+    private void OnDecryptDocumentClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab?.PdfBytes == null) return;
+
+        if (!Tab.SecurityService.IsEncrypted(Tab.PdfBytes))
+        {
+            ShowInfoDialog("Decrypt", "This document is not encrypted.");
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Title = "Decrypt Document",
+            Width = 400, Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(15), Spacing = 10 };
+        panel.Children.Add(new TextBlock { Text = "Enter password to decrypt:", FontSize = 13 });
+
+        var pwBox = new TextBox { PasswordChar = '*', Padding = new Thickness(6, 4), Watermark = "Password..." };
+        panel.Children.Add(pwBox);
+
+        var btnRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8 };
+        var decryptBtn = new Button { Content = "Decrypt", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        decryptBtn.Click += (s, ev) =>
+        {
+            var pw = pwBox.Text?.Trim();
+            if (string.IsNullOrEmpty(pw)) return;
+
+            try
+            {
+                var decrypted = Tab.SecurityService.Decrypt(Tab.PdfBytes, pw);
+                Tab.UpdatePdfBytes(decrypted, "Decrypt Document");
+                dialog.Close();
+                ShowInfoDialog("Decrypt", "Document decrypted successfully.");
+            }
+            catch (Exception ex)
+            {
+                ShowInfoDialog("Error", $"Decryption failed: {ex.Message}");
+            }
+        };
+        btnRow.Children.Add(decryptBtn);
+
+        var cancelBtn = new Button { Content = "Cancel", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        cancelBtn.Click += (s, ev) => dialog.Close();
+        btnRow.Children.Add(cancelBtn);
+
+        panel.Children.Add(btnRow);
+        dialog.Content = panel;
+        dialog.Show(this);
+    }
+
+    #endregion
+
+    #region Annotation Export
+
+    private async void OnExportAnnotationReportClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null) return;
+
+        var annotations = Tab.Annotations;
+        if (annotations.Count == 0)
+        {
+            ShowInfoDialog("Export Report", "No annotations to export.");
+            return;
+        }
+
+        var saveDlg = new Avalonia.Platform.Storage.FilePickerSaveOptions
+        {
+            Title = "Export Annotation Report",
+            DefaultExtension = "html",
+            SuggestedFileName = $"annotations_{IOPath.GetFileNameWithoutExtension(Tab.FilePath ?? "document")}.html",
+            FileTypeChoices = new[]
+            {
+                new Avalonia.Platform.Storage.FilePickerFileType("HTML Report") { Patterns = new[] { "*.html" } },
+                new Avalonia.Platform.Storage.FilePickerFileType("Text Report") { Patterns = new[] { "*.txt" } },
+                new Avalonia.Platform.Storage.FilePickerFileType("CSV Export") { Patterns = new[] { "*.csv" } }
+            }
+        };
+
+        var file = await StorageProvider.SaveFilePickerAsync(saveDlg);
+        if (file == null) return;
+
+        try
+        {
+            var filePath = file.Path.LocalPath;
+            var ext = IOPath.GetExtension(filePath).ToLowerInvariant();
+            var docName = IOPath.GetFileName(Tab.FilePath ?? "document.pdf");
+            string content;
+
+            if (ext is ".csv")
+                content = Tab.AnnotationExportService.GenerateCsvReport(annotations);
+            else if (ext is ".txt")
+                content = Tab.AnnotationExportService.GenerateTextReport(annotations, docName);
+            else
+                content = Tab.AnnotationExportService.GenerateHtmlReport(annotations, docName);
+
+            await File.WriteAllTextAsync(filePath, content);
+            ShowInfoDialog("Export Report", $"Annotation report ({annotations.Count} annotations) saved to:\n{filePath}");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"Failed to export report: {ex.Message}");
+        }
+    }
+
+    private async void OnExportXfdfClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null) return;
+
+        var annotations = Tab.Annotations;
+        if (annotations.Count == 0)
+        {
+            ShowInfoDialog("Export XFDF", "No annotations to export.");
+            return;
+        }
+
+        var saveDlg = new Avalonia.Platform.Storage.FilePickerSaveOptions
+        {
+            Title = "Export Annotations to XFDF",
+            DefaultExtension = "xfdf",
+            SuggestedFileName = IOPath.GetFileNameWithoutExtension(Tab.FilePath ?? "document") + ".xfdf",
+            FileTypeChoices = new[]
+            {
+                new Avalonia.Platform.Storage.FilePickerFileType("XFDF Files") { Patterns = new[] { "*.xfdf" } }
+            }
+        };
+
+        var file = await StorageProvider.SaveFilePickerAsync(saveDlg);
+        if (file == null) return;
+
+        try
+        {
+            await Tab.XfdfAnnotationService.ExportToFileAsync(
+                annotations.ToList(), file.Path.LocalPath, Tab.FilePath);
+            ShowInfoDialog("Export XFDF", $"Exported {annotations.Count} annotation(s) to XFDF.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"XFDF export failed: {ex.Message}");
+        }
+    }
+
+    private async void OnImportXfdfClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null) return;
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import Annotations from XFDF",
+            AllowMultiple = false,
+            FileTypeFilter = new[] { new FilePickerFileType("XFDF Files") { Patterns = new[] { "*.xfdf" } } }
+        });
+        if (files == null || files.Count == 0) return;
+
+        try
+        {
+            var imported = await Tab.XfdfAnnotationService.ImportFromFileAsync(files[0].Path.LocalPath);
+            if (imported.Count == 0)
+            {
+                ShowInfoDialog("Import XFDF", "No annotations found in the XFDF file.");
+                return;
+            }
+
+            foreach (var ann in imported)
+                Tab.Annotations.Add(ann);
+
+            ShowInfoDialog("Import XFDF", $"Imported {imported.Count} annotation(s) from XFDF.");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoDialog("Error", $"XFDF import failed: {ex.Message}");
+        }
+    }
+
+    private void OnAnnotationPropertiesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null) return;
+
+        var annotations = Tab.Annotations;
+        if (annotations.Count == 0)
+        {
+            ShowInfoDialog("Annotation Properties", "No annotations in this document.");
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Title = "Annotation Properties",
+            Width = 500, Height = 550,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var mainPanel = new StackPanel { Margin = new Thickness(15), Spacing = 8 };
+        mainPanel.Children.Add(new TextBlock { Text = "Annotation Properties", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        mainPanel.Children.Add(new TextBlock { Text = "Select an annotation to view/edit its properties:", FontSize = 12, Opacity = 0.7 });
+
+        var annoCombo = new ComboBox { MinWidth = 350 };
+        for (int i = 0; i < annotations.Count; i++)
+        {
+            var a = annotations[i];
+            annoCombo.Items.Add($"[{i + 1}] {a.Type} (Page {a.PageIndex + 1})");
+        }
+        if (annotations.Count > 0) annoCombo.SelectedIndex = 0;
+        mainPanel.Children.Add(annoCombo);
+
+        var propsPanel = new StackPanel { Spacing = 6, Margin = new Thickness(0, 10, 0, 0) };
+
+        var colorLabel = new TextBlock { Text = "Color:", FontSize = 12 };
+        var colorBox = new TextBox { Padding = new Thickness(4, 2), Watermark = "#000000" };
+        propsPanel.Children.Add(colorLabel);
+        propsPanel.Children.Add(colorBox);
+
+        var fillColorLabel = new TextBlock { Text = "Fill Color:", FontSize = 12 };
+        var fillColorBox = new TextBox { Padding = new Thickness(4, 2), Watermark = "#FFFF00" };
+        propsPanel.Children.Add(fillColorLabel);
+        propsPanel.Children.Add(fillColorBox);
+
+        var opacityLabel = new TextBlock { Text = "Opacity (0.0 - 1.0):", FontSize = 12 };
+        var opacityBox = new TextBox { Padding = new Thickness(4, 2), Watermark = "0.30" };
+        propsPanel.Children.Add(opacityLabel);
+        propsPanel.Children.Add(opacityBox);
+
+        var fontSizeLabel = new TextBlock { Text = "Font Size:", FontSize = 12 };
+        var fontSizeBox = new TextBox { Padding = new Thickness(4, 2), Watermark = "14" };
+        propsPanel.Children.Add(fontSizeLabel);
+        propsPanel.Children.Add(fontSizeBox);
+
+        var strokeLabel = new TextBlock { Text = "Stroke Width:", FontSize = 12 };
+        var strokeBox = new TextBox { Padding = new Thickness(4, 2), Watermark = "1.0" };
+        propsPanel.Children.Add(strokeLabel);
+        propsPanel.Children.Add(strokeBox);
+
+        var textLabel = new TextBlock { Text = "Text / Content:", FontSize = 12 };
+        var textBox = new TextBox { Padding = new Thickness(4, 2), AcceptsReturn = true, Height = 60 };
+        propsPanel.Children.Add(textLabel);
+        propsPanel.Children.Add(textBox);
+
+        mainPanel.Children.Add(propsPanel);
+
+        void UpdatePropsDisplay()
+        {
+            if (annoCombo.SelectedIndex >= 0 && annoCombo.SelectedIndex < annotations.Count)
+            {
+                var a = annotations[annoCombo.SelectedIndex];
+                colorBox.Text = a.Color;
+                fillColorBox.Text = a.FillColor;
+                opacityBox.Text = a.FillOpacity.ToString("F2");
+                fontSizeBox.Text = a.FontSize.ToString("F1");
+                strokeBox.Text = a.StrokeWidth.ToString("F1");
+                textBox.Text = a.Text ?? a.NoteContent ?? a.StampText ?? "";
+            }
+        }
+        UpdatePropsDisplay();
+        annoCombo.SelectionChanged += (s, ev) => UpdatePropsDisplay();
+
+        var btnRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
+        var applyBtn = new Button { Content = "Apply", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        applyBtn.Click += (s, ev) =>
+        {
+            if (annoCombo.SelectedIndex < 0 || annoCombo.SelectedIndex >= annotations.Count) return;
+            var a = annotations[annoCombo.SelectedIndex];
+            if (!string.IsNullOrWhiteSpace(colorBox.Text)) a.Color = colorBox.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(fillColorBox.Text)) a.FillColor = fillColorBox.Text.Trim();
+            if (float.TryParse(opacityBox.Text, out float op)) a.FillOpacity = Math.Clamp(op, 0f, 1f);
+            if (float.TryParse(fontSizeBox.Text, out float fs)) a.FontSize = Math.Max(1f, fs);
+            if (float.TryParse(strokeBox.Text, out float sw)) a.StrokeWidth = Math.Max(0.1f, sw);
+
+            var txt = textBox.Text;
+            if (a.Type == AnnotationType.StickyNote) a.NoteContent = txt;
+            else if (a.Type == AnnotationType.Stamp) a.StampText = txt;
+            else a.Text = txt;
+
+            dialog.Close();
+            ShowInfoDialog("Annotation Properties", "Annotation properties updated.");
+        };
+        btnRow.Children.Add(applyBtn);
+
+        var deleteBtn = new Button { Content = "Delete", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        deleteBtn.Click += (s, ev) =>
+        {
+            if (annoCombo.SelectedIndex >= 0 && annoCombo.SelectedIndex < annotations.Count)
+            {
+                annotations.RemoveAt(annoCombo.SelectedIndex);
+                dialog.Close();
+                ShowInfoDialog("Annotation Properties", "Annotation deleted.");
+            }
+        };
+        btnRow.Children.Add(deleteBtn);
+
+        var cancelBtn = new Button { Content = "Cancel", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        cancelBtn.Click += (s, ev) => dialog.Close();
+        btnRow.Children.Add(cancelBtn);
+
+        mainPanel.Children.Add(btnRow);
+        dialog.Content = mainPanel;
+        dialog.Show(this);
+    }
+
+    private void OnCustomStampClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null) return;
+
+        var dialog = new Window
+        {
+            Title = "Create Custom Stamp",
+            Width = 420, Height = 400,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(15), Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = "Create Custom Stamp", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        panel.Children.Add(new TextBlock { Text = "Design a custom stamp annotation for the current page.", FontSize = 12, Opacity = 0.7 });
+
+        panel.Children.Add(new TextBlock { Text = "Stamp Text:", FontSize = 12, Margin = new Thickness(0, 8, 0, 0) });
+        var stampTextBox = new TextBox { Text = "CUSTOM", Padding = new Thickness(4, 2) };
+        panel.Children.Add(stampTextBox);
+
+        panel.Children.Add(new TextBlock { Text = "Color (hex):", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
+        var colorBox = new TextBox { Text = "#FF0000", Padding = new Thickness(4, 2) };
+        panel.Children.Add(colorBox);
+
+        panel.Children.Add(new TextBlock { Text = "Font Size:", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
+        var fontSizeBox = new TextBox { Text = "24", Padding = new Thickness(4, 2) };
+        panel.Children.Add(fontSizeBox);
+
+        panel.Children.Add(new TextBlock { Text = "Rotation (degrees):", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
+        var rotationBox = new TextBox { Text = "-30", Padding = new Thickness(4, 2) };
+        panel.Children.Add(rotationBox);
+
+        panel.Children.Add(new TextBlock { Text = "Opacity (0.0 - 1.0):", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
+        var opacityBox = new TextBox { Text = "0.5", Padding = new Thickness(4, 2) };
+        panel.Children.Add(opacityBox);
+
+        var addBtn = new Button { Content = "Add Stamp", MinWidth = 100, HorizontalContentAlignment = HorizontalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        addBtn.Click += (s, ev) =>
+        {
+            var text = stampTextBox.Text?.Trim();
+            if (string.IsNullOrEmpty(text))
+            {
+                ShowInfoDialog("Error", "Stamp text is required.");
+                return;
+            }
+
+            float fontSize = 24f;
+            float.TryParse(fontSizeBox.Text, out fontSize);
+            double rotation = -30;
+            double.TryParse(rotationBox.Text, out rotation);
+            float opacity = 0.5f;
+            float.TryParse(opacityBox.Text, out opacity);
+
+            var stamp = new PDFEditor.Core.Services.PdfAnnotation
+            {
+                Type = PDFEditor.Core.Services.AnnotationType.Stamp,
+                PageIndex = Tab.CurrentPageIndex,
+                X = 0.2,
+                Y = 0.3,
+                Width = 0.6,
+                Height = 0.15,
+                StampPreset = PDFEditor.Core.Services.StampType.Custom,
+                StampText = text,
+                Color = colorBox.Text?.Trim() ?? "#FF0000",
+                FontSize = Math.Max(1f, fontSize),
+                Rotation = rotation,
+                FillOpacity = Math.Clamp(opacity, 0f, 1f)
+            };
+
+            Tab.Annotations.Add(stamp);
+            dialog.Close();
+            ShowInfoDialog("Custom Stamp", $"Added custom stamp \"{text}\" on page {Tab.CurrentPageIndex + 1}.");
+        };
+        panel.Children.Add(addBtn);
+
+        dialog.Content = panel;
+        dialog.Show(this);
     }
 
     #endregion

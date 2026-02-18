@@ -3,12 +3,23 @@ using iText.Kernel.Pdf;
 namespace PDFEditor.Core.Services;
 
 /// <summary>
+/// Supported encryption levels for PDF documents.
+/// </summary>
+public enum PdfEncryptionLevel
+{
+    /// <summary>128-bit AES encryption (PDF 1.6+)</summary>
+    Aes128,
+    /// <summary>256-bit AES encryption (PDF 2.0, most secure)</summary>
+    Aes256
+}
+
+/// <summary>
 /// Password protection, encryption, and permission management for PDFs
 /// </summary>
 public class PdfSecurityService
 {
     /// <summary>
-    /// Encrypts a PDF with user and/or owner passwords (256-bit AES)
+    /// Encrypts a PDF with user and/or owner passwords using the specified encryption level.
     /// </summary>
     /// <param name="pdfBytes">Input PDF bytes</param>
     /// <param name="userPassword">Password to open the document (null = no open password)</param>
@@ -16,13 +27,22 @@ public class PdfSecurityService
     /// <param name="allowPrinting">Allow printing</param>
     /// <param name="allowCopying">Allow text/image copying</param>
     /// <param name="allowEditing">Allow content editing</param>
+    /// <param name="encryptionLevel">Encryption strength (128-bit or 256-bit AES)</param>
     public byte[] Encrypt(byte[] pdfBytes, string? userPassword, string ownerPassword,
-        bool allowPrinting = true, bool allowCopying = true, bool allowEditing = false)
+        bool allowPrinting = true, bool allowCopying = true, bool allowEditing = false,
+        PdfEncryptionLevel encryptionLevel = PdfEncryptionLevel.Aes256)
     {
         int permissions = 0;
         if (allowPrinting) permissions |= EncryptionConstants.ALLOW_PRINTING;
         if (allowCopying) permissions |= EncryptionConstants.ALLOW_COPY;
         if (allowEditing) permissions |= EncryptionConstants.ALLOW_MODIFY_CONTENTS;
+
+        int encryptionConstant = encryptionLevel switch
+        {
+            PdfEncryptionLevel.Aes128 => EncryptionConstants.ENCRYPTION_AES_128,
+            PdfEncryptionLevel.Aes256 => EncryptionConstants.ENCRYPTION_AES_256,
+            _ => EncryptionConstants.ENCRYPTION_AES_256
+        };
 
         var outputMs = new MemoryStream();
         var readerProps = new ReaderProperties();
@@ -34,7 +54,7 @@ public class PdfSecurityService
                     userPassword != null ? System.Text.Encoding.UTF8.GetBytes(userPassword) : null,
                     System.Text.Encoding.UTF8.GetBytes(ownerPassword),
                     permissions,
-                    EncryptionConstants.ENCRYPTION_AES_256);
+                    encryptionConstant);
 
             using var writer = new PdfWriter(outputMs, writerProps);
             var srcDoc = new PdfDocument(reader);

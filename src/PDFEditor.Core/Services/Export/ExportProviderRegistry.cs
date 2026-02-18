@@ -57,6 +57,17 @@ public class ExportProviderRegistry
         registry.Register(new TextExportProvider());
         registry.Register(new HtmlExportProvider());
         registry.Register(new DocxExportProvider());
+        registry.Register(new XlsxExportProvider());
+        registry.Register(new RtfExportProvider());
+        registry.Register(new MarkdownExportProvider());
+        registry.Register(new CsvExportProvider());
+        registry.Register(new JsonExportProvider());
+        registry.Register(new PptxExportProvider());
+        registry.Register(new EpubExportProvider());
+        registry.Register(new LatexExportProvider());
+        registry.Register(new OdtExportProvider());
+        registry.Register(new OdpExportProvider());
+        registry.Register(new OdsExportProvider());
         return registry;
     }
 }

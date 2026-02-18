@@ -113,6 +113,11 @@
         <StreamGeometry x:Key="IconCross">M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z</StreamGeometry>
         <StreamGeometry x:Key="IconWarning">M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z</StreamGeometry>
         <StreamGeometry x:Key="IconLock">M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z</StreamGeometry>
+        <!-- Forms & Signatures -->
+        <StreamGeometry x:Key="IconForm">M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13zM9 13h6v2H9v-2zm0 4h6v2H9v-2zm0-8h2v2H9V9z</StreamGeometry>
+        <StreamGeometry x:Key="IconSignature">M3 17.97V21h3.03L17.46 9.57l-3.03-3.03L3 17.97zM21.72 6.28c.39-.39.39-1.02 0-1.41l-1.59-1.59c-.39-.39-1.02-.39-1.41 0l-1.65 1.65 3 3 1.65-1.65z</StreamGeometry>
+        <StreamGeometry x:Key="IconCertificate">M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z</StreamGeometry>
+        <StreamGeometry x:Key="IconListAlt">M19 5v14H5V5h14m1.1-2H3.9c-.5 0-.9.4-.9.9v16.2c0 .4.4.9.9.9h16.2c.4 0 .9-.5.9-.9V3.9c0-.5-.5-.9-.9-.9zM11 7h6v2h-6V7zm0 4h6v2h-6v-2zm0 4h6v2h-6v-2zM7 7h2v2H7V7zm0 4h2v2H7v-2zm0 4h2v2H7v-2z</StreamGeometry>
         <!-- Actions -->
         <StreamGeometry x:Key="IconBurn">M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z</StreamGeometry>
         <StreamGeometry x:Key="IconClose">M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z</StreamGeometry>
@@ -212,6 +217,43 @@
                 <Separator />
                 <MenuItem Header="_OCR Current Page..." Click="OnOcrCurrentPageClick" />
                 <MenuItem Header="OCR _All Pages..." Click="OnOcrAllPagesClick" />
+                <MenuItem Header="Make _Searchable PDF (OCR)..." Click="OnMakeSearchablePdfClick" />
+                <Separator />
+                <MenuItem Header="_Form Fields">
+                    <MenuItem Header="_Detect Form Fields" Click="OnDetectFormFieldsClick" />
+                    <MenuItem Header="_Fill Form..." Click="OnFillFormClick" />
+                    <MenuItem Header="F_latten Form" Click="OnFlattenFormClick" />
+                    <Separator />
+                    <MenuItem Header="_Export Form Data..." Click="OnExportFormDataClick" />
+                    <MenuItem Header="_Import Form Data..." Click="OnImportFormDataClick" />
+                    <Separator />
+                    <MenuItem Header="_Add Text Field" Click="OnAddTextFieldClick" />
+                    <MenuItem Header="Add _Checkbox" Click="OnAddCheckboxFieldClick" />
+                    <MenuItem Header="Add _Dropdown" Click="OnAddDropdownFieldClick" />
+                </MenuItem>
+                <MenuItem Header="Digital _Signatures">
+                    <MenuItem Header="_Sign Document..." Click="OnSignDocumentClick" />
+                    <MenuItem Header="_Verify Signatures" Click="OnVerifySignaturesClick" />
+                    <MenuItem Header="List Si_gnatures" Click="OnListSignaturesClick" />
+                    <Separator />
+                    <MenuItem Header="_Add Signature Field" Click="OnAddSignatureFieldClick" />
+                    <Separator />
+                    <MenuItem Header="_Certificate Manager..." Click="OnCertificateManagerClick" />
+                </MenuItem>
+                <Separator />
+                <MenuItem Header="_Redaction">
+                    <MenuItem Header="Redact _Text..." Click="OnRedactTextClick" />
+                    <MenuItem Header="Redact Current _Page" Click="OnRedactPageClick" />
+                    <MenuItem Header="Find Redaction _Targets..." Click="OnFindRedactionTargetsClick" />
+                </MenuItem>
+                <MenuItem Header="_Compare Documents..." Click="OnCompareDocumentsClick" />
+                <Separator />
+                <MenuItem Header="_Security">
+                    <MenuItem Header="_Encrypt / Set Permissions..." Click="OnPermissionManagerClick" />
+                    <MenuItem Header="_Decrypt Document..." Click="OnDecryptDocumentClick" />
+                </MenuItem>
+                <Separator />
+                <MenuItem Header="Export Annotation Re_port..." Click="OnExportAnnotationReportClick" />
             </MenuItem>
             <MenuItem Header="_Annotate">
                 <MenuItem Header="Toggle Annotation _Mode" Click="OnToggleAnnotationMode" />
@@ -643,12 +685,72 @@
 
                         <Separator Margin="0,10" />
 
+                        <!-- Forms -->
+                        <TextBlock Classes="rp-header" Text="Form Fields" />
+                        <StackPanel Spacing="3">
+                            <Button Classes="rp-btn" Content="Detect Fields" Click="OnDetectFormFieldsClick" />
+                            <Button Classes="rp-btn" Content="Fill Form..." Click="OnFillFormClick" />
+                            <Button Classes="rp-btn" Content="Flatten Form" Click="OnFlattenFormClick" />
+                            <Button Classes="rp-btn" Content="Export Form Data..." Click="OnExportFormDataClick" />
+                            <Button Classes="rp-btn" Content="Import Form Data..." Click="OnImportFormDataClick" />
+                        </StackPanel>
+
+                        <Separator Margin="0,10" />
+
+                        <!-- Signatures -->
+                        <TextBlock Classes="rp-header" Text="Signatures" />
+                        <StackPanel Spacing="3">
+                            <Button Classes="rp-btn" Content="Sign Document..." Click="OnSignDocumentClick" />
+                            <Button Classes="rp-btn" Content="Verify Signatures" Click="OnVerifySignaturesClick" />
+                            <Button Classes="rp-btn" Content="List Signatures" Click="OnListSignaturesClick" />
+                            <Button Classes="rp-btn" Content="Certificate Manager..." Click="OnCertificateManagerClick" />
+                        </StackPanel>
+
+                        <Separator Margin="0,10" />
+
                         <!-- Annotations -->
                         <TextBlock Classes="rp-header" Text="Annotations" />
                         <StackPanel Spacing="3">
                             <Button Classes="rp-btn" Content="Toggle Annotation Mode" Click="OnToggleAnnotationMode" />
                             <Button Classes="rp-btn" Content="Burn into PDF" Click="OnBurnAnnotations" Foreground="OrangeRed" />
                             <Button Classes="rp-btn" Content="Undo History..." Click="OnUndoHistoryClick" />
+                            <Button Classes="rp-btn" Content="Annotation List..." Click="OnAnnotationListClick" />
+                            <Button Classes="rp-btn" Content="Export Report..." Click="OnExportAnnotationReportClick" />
+                        </StackPanel>
+
+                        <Separator Margin="0,10" />
+
+                        <!-- Searchable PDF -->
+                        <TextBlock Classes="rp-header" Text="Searchable PDF" />
+                        <StackPanel Spacing="3">
+                            <Button Classes="rp-btn" Content="Make Searchable (OCR)..." Click="OnMakeSearchablePdfClick" />
+                        </StackPanel>
+
+                        <Separator Margin="0,10" />
+
+                        <!-- Redaction -->
+                        <TextBlock Classes="rp-header" Text="Redaction" />
+                        <StackPanel Spacing="3">
+                            <Button Classes="rp-btn" Content="Redact Text..." Click="OnRedactTextClick" />
+                            <Button Classes="rp-btn" Content="Redact Current Page" Click="OnRedactPageClick" Foreground="OrangeRed" />
+                            <Button Classes="rp-btn" Content="Find Targets..." Click="OnFindRedactionTargetsClick" />
+                        </StackPanel>
+
+                        <Separator Margin="0,10" />
+
+                        <!-- Document Comparison -->
+                        <TextBlock Classes="rp-header" Text="Compare" />
+                        <StackPanel Spacing="3">
+                            <Button Classes="rp-btn" Content="Compare Documents..." Click="OnCompareDocumentsClick" />
+                        </StackPanel>
+
+                        <Separator Margin="0,10" />
+
+                        <!-- Security -->
+                        <TextBlock Classes="rp-header" Text="Security" />
+                        <StackPanel Spacing="3">
+                            <Button Classes="rp-btn" Content="Encrypt / Permissions..." Click="OnPermissionManagerClick" />
+                            <Button Classes="rp-btn" Content="Decrypt Document..." Click="OnDecryptDocumentClick" />
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

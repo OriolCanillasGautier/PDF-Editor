@@ -122,6 +122,11 @@ public class ExportOptions
     /// Base file name (without extension) for naming exported files
     /// </summary>
     public string BaseFileName { get; set; } = "export";
+
+    /// <summary>
+    /// When true, use high-fidelity export engine (e.g., pdf2docx Python backend) if available.
+    /// </summary>
+    public bool UseHighFidelityEngine { get; set; } = false;
 }
 
 /// <summary>

@@ -24,6 +24,9 @@ The PDF Editor is structured using a **layered architecture** with clear separat
 │  - PdfSecurityService, PdfCropService       │
 │  - PdfWatermarkService, PdfAnnotationService│
 │  - PdfExportService, PdfBatchService        │
+│  - PdfFormService, PdfSignatureService      │
+│  - PdfRedactionService, PdfComparisonService│
+│  - AnnotationExportService                  │
 │  - SessionService, UndoRedoManager          │
 └─────────────────────────────────────────────┘
                       ↓
@@ -47,7 +50,7 @@ The PDF Editor is structured using a **layered architecture** with clear separat
 | `PdfExportService` | Export to images, text, HTML, images-to-PDF | Magick.NET + Docnet |
 | `PdfSearchService` | Full-text search with context, text extraction | iText7 |
 | `PdfSplitService` | Split, extract, reorder, move, insert pages | iText7 |
-| `PdfSecurityService` | AES-256 encryption, password protection | iText7 |
+| `PdfSecurityService` | AES-128/256 encryption, password protection, decryption | iText7 |
 | `PdfCropService` | Crop, margins, resize to standard sizes | iText7 |
 | `PdfWatermarkService` | Text watermarks, headers, footers, page numbers | iText7 |
 | `PdfAnnotationService` | Burn annotations into PDF (10 types) | iText7 + Magick.NET |
@@ -55,7 +58,45 @@ The PDF Editor is structured using a **layered architecture** with clear separat
 | `TesseractOcrService` | OCR text recognition with multi-language | Tesseract.NET 5.2.0 |
 | `SessionService` | User session persistence (JSON) | Newtonsoft.Json |
 | `UndoRedoManager` | Undo/redo stack with state snapshots | Custom |
+| `PdfFormService` | Form field CRUD, fill, flatten, import/export | iText7 |
+| `PdfSignatureService` | Digital signing, verification, certificate listing | iText7 + BouncyCastle |
+| `PdfRedactionService` | Permanent redaction (area, text, page-level) | iText7 |
+| `PdfComparisonService` | Text-based document diff (LCS), text/HTML reports | iText7 |
+| `AnnotationExportService` | Export annotations to text/HTML/CSV reports | Custom |
+| `SearchablePdfService` | Add invisible OCR text layer to scanned PDFs | iText7 + Tesseract.NET |
+| `XfdfAnnotationService` | XFDF annotation import/export (Adobe standard) | System.Xml.Linq |
 | `ExportProviderRegistry` | Registry for pluggable export format providers | Custom |
+| `MeasurementService` | Distance, area, perimeter measurement with units | Custom |
+| `FormValidationService` | Form field validation rules (13 rule types) | Custom |
+| `VisualDiffService` | Pixel-level page comparison, side-by-side images | Magick.NET |
+| `CertificateManagerService` | Certificate store enumeration, PFX inspection | System.Security |
+| `MetadataScrubberService` | Remove author/creator/keywords metadata | iText7 |
+| `PrintToPdfService` | Page normalization, fit-to-page, margins | iText7 |
+| `PdfArchiverService` | PDF/A-2B conversion with ICC profiles | iText7 |
+| `PdfBookletService` | Booklet 2-up imposition for saddle-stitch printing | iText7 |
+| `HeaderFooterService` | Add/remove headers, footers, page numbers | iText7 |
+| `ImageExtractionService` | Extract embedded images from PDF | iText7 + Magick.NET |
+| `AutoCropService` | Analyze margins and auto-crop white space | iText7 |
+| `TableOfContentsService` | Detect headings, generate PDF bookmarks | iText7 |
+| `ElectronicSignatureService` | Create/embed visual signatures (draw/type/upload) | Magick.NET + iText7 |
+| `BarcodeService` | QR, Code128, Code39, EAN13, DataMatrix, PDF417 | iText7 |
+| `AccessibilityCheckerService` | WCAG/PDF/UA compliance audit (11 rule categories) | iText7 |
+| `DeskewService` | Analyze and correct page skew in scanned PDFs | Magick.NET + Docnet |
+| `BackgroundRemovalService` | Remove colored/noisy backgrounds from scans | Magick.NET + Docnet |
+| `ImageCompressService` | Compress/optimize embedded images | iText7 + Magick.NET |
+| `ImageReplaceService` | List and replace embedded images | iText7 + Magick.NET |
+| `DocumentSanitizerService` | Remove JavaScript, embedded files, metadata | iText7 |
+| `AutoTagService` | Add structure tags for accessibility | iText7 |
+| `AltTextEditorService` | Get/set image alt text descriptions | iText7 |
+| `FontReplacementService` | Analyze and replace fonts throughout PDF | iText7 |
+| `PdfTextEditService` | Direct text editing (extract, modify, replace) | iText7 |
+| `TableEditorService` | Detect tables, edit cells, export to HTML/CSV | iText7 |
+| `CalculationFieldService` | Auto-calculate form field values (sum, avg, etc.) | Custom |
+| `ConditionalLogicService` | Show/hide form fields based on conditions | Custom |
+| `QuickActionsService` | Customizable macro actions with templates | Custom |
+| `TemplateService` | Save/restore document templates | Custom |
+| `WatchFolderService` | Monitor folder and auto-process dropped files | FileSystemWatcher |
+| `PdfXService` | PDF/X print production compliance (inspect/convert) | iText7 |
 
 ## Export Provider System
 
@@ -66,7 +107,18 @@ IExportProvider (interface)
 ├── ImageExportProvider    → PNG, JPEG, TIFF, BMP, WebP
 ├── TextExportProvider     → TXT
 ├── HtmlExportProvider     → HTML (visual with base64 images)
-└── DocxExportProvider     → DOCX (Microsoft Word)
+├── DocxExportProvider     → DOCX (Microsoft Word, SDK-free)
+├── XlsxExportProvider     → XLSX (Excel with table detection)
+├── RtfExportProvider      → RTF (Rich Text Format)
+├── MarkdownExportProvider → MD (GitHub-compatible Markdown)
+├── CsvExportProvider      → CSV (RFC-4180 table extraction)
+├── JsonExportProvider     → JSON (structured text blocks)
+├── PptxExportProvider     → PPTX (PowerPoint with page images)
+├── EpubExportProvider     → EPUB 3.0 (e-book with TOC)
+├── LatexExportProvider    → TEX (LaTeX with heading/formatting)
+├── OdtExportProvider      → ODT (OpenDocument Text)
+├── OdpExportProvider      → ODP (OpenDocument Presentation)
+└── OdsExportProvider      → ODS (OpenDocument Spreadsheet)
 ```
 
 **Adding a new export format:**
@@ -227,7 +279,7 @@ public class MainViewModel : ViewModelBase
 
 ## Testing Strategy
 
-Using **xUnit** + **Moq** for unit tests. **97 tests** across 9 test files.
+Using **xUnit** + **Moq** for unit tests. **174 tests** across 16 test files.
 
 ### Test Structure
 ```
@@ -238,13 +290,20 @@ src/PDFEditor.Tests/
     ├── PdfOperationsTests.cs       # Page count, delete, rotate, merge, text, metadata
     ├── PdfSearchServiceTests.cs    # Search, case sensitivity, multi-page, count, extract
     ├── PdfSplitServiceTests.cs     # Extract, split all, move, insert, reorder
-    ├── PdfSecurityServiceTests.cs  # Encrypt, decrypt, is-encrypted, try-open
+    ├── PdfSecurityServiceTests.cs  # Encrypt, decrypt, is-encrypted, try-open, AES-128/256 levels
     ├── PdfCropServiceTests.cs      # Crop, margins, resize, standard sizes
     ├── PdfWatermarkServiceTests.cs # Watermark, header/footer, page numbers
     ├── PdfAnnotationServiceTests.cs# Burn annotations, clone, out-of-range
     ├── PdfExportServiceTests.cs    # Image export, text, HTML, images-to-PDF
     ├── UndoRedoManagerTests.cs     # Undo, redo, clear, history, multi-step
-    └── ExportProviderRegistryTests.cs # Registry, providers, async export
+    ├── ExportProviderRegistryTests.cs # Registry, providers, async export, XLSX/RTF
+    ├── PdfFormServiceTests.cs      # Detect, fill, flatten, export/import, add fields, radio/sig, props
+    ├── PdfSignatureServiceTests.cs  # Get/verify signatures, add fields, list certs
+    ├── PdfRedactionServiceTests.cs  # Find targets, redact text/areas/pages, edge cases
+    ├── PdfComparisonServiceTests.cs # Identical/different docs, metadata, reports
+    ├── AnnotationExportServiceTests.cs # Text/HTML/CSV generation, formatting
+    ├── SearchablePdfServiceTests.cs  # IsPageImageBased, CountImageBasedPages
+    └── XfdfAnnotationServiceTests.cs # XFDF export/import, roundtrip, all annotation types
 ```
 
 ### TestPdfGenerator

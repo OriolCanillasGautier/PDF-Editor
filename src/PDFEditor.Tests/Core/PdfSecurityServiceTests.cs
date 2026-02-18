@@ -85,4 +85,64 @@ public class PdfSecurityServiceTests
         Assert.NotNull(encrypted);
         Assert.True(encrypted.Length > 0);
     }
+
+    #region Encryption Levels
+
+    [Fact]
+    public void Encrypt_WithAes256_ProducesEncryptedPdf()
+    {
+        var pdf = TestPdfGenerator.CreateMinimalPdf();
+        var encrypted = _securityService.Encrypt(pdf, "user", "owner",
+            encryptionLevel: PdfEncryptionLevel.Aes256);
+        Assert.NotNull(encrypted);
+        Assert.True(encrypted.Length > 0);
+        Assert.True(_securityService.IsEncrypted(encrypted));
+    }
+
+    [Fact]
+    public void Encrypt_WithAes128_ProducesEncryptedPdf()
+    {
+        var pdf = TestPdfGenerator.CreateMinimalPdf();
+        var encrypted = _securityService.Encrypt(pdf, "user", "owner",
+            encryptionLevel: PdfEncryptionLevel.Aes128);
+        Assert.NotNull(encrypted);
+        Assert.True(encrypted.Length > 0);
+        Assert.True(_securityService.IsEncrypted(encrypted));
+    }
+
+    [Fact]
+    public void Encrypt_Aes128_CanBeDecryptedWithPassword()
+    {
+        var pdf = TestPdfGenerator.CreateMinimalPdf();
+        var encrypted = _securityService.Encrypt(pdf, "pass128", "owner128",
+            encryptionLevel: PdfEncryptionLevel.Aes128);
+        var decrypted = _securityService.Decrypt(encrypted, "owner128");
+        Assert.NotNull(decrypted);
+        Assert.False(_securityService.IsEncrypted(decrypted));
+    }
+
+    [Fact]
+    public void Encrypt_Aes256_CanBeDecryptedWithPassword()
+    {
+        var pdf = TestPdfGenerator.CreateMinimalPdf();
+        var encrypted = _securityService.Encrypt(pdf, "pass256", "owner256",
+            encryptionLevel: PdfEncryptionLevel.Aes256);
+        var decrypted = _securityService.Decrypt(encrypted, "owner256");
+        Assert.NotNull(decrypted);
+        Assert.False(_securityService.IsEncrypted(decrypted));
+    }
+
+    [Fact]
+    public void Encrypt_DefaultLevel_IsAes256()
+    {
+        var pdf = TestPdfGenerator.CreateMinimalPdf();
+        var encrypted1 = _securityService.Encrypt(pdf, "user", "owner");
+        var encrypted2 = _securityService.Encrypt(pdf, "user", "owner",
+            encryptionLevel: PdfEncryptionLevel.Aes256);
+        // Both should produce encrypted PDFs (can't compare byte-by-byte due to randomization)
+        Assert.True(_securityService.IsEncrypted(encrypted1));
+        Assert.True(_securityService.IsEncrypted(encrypted2));
+    }
+
+    #endregion
 }

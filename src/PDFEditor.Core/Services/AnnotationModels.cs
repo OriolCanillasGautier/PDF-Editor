@@ -17,7 +17,10 @@ public enum AnnotationType
     Stamp,
     StickyNote,
     Underline,
-    Strikethrough
+    Strikethrough,
+    MeasureRuler,
+    MeasureArea,
+    MeasurePerimeter
 }
 
 /// <summary>
@@ -91,6 +94,28 @@ public class PdfAnnotation
     // Rotation (degrees)
     public double Rotation { get; set; }
 
+    // Measurement annotations
+    /// <summary>
+    /// Unit for measurement display (e.g., "mm", "cm", "in", "pt").
+    /// </summary>
+    public string MeasureUnit { get; set; } = "mm";
+
+    /// <summary>
+    /// Scale factor for measurements (PDF points per real-world unit).
+    /// Default 1pt = 1/72 inch.
+    /// </summary>
+    public double MeasureScale { get; set; } = 1.0;
+
+    /// <summary>
+    /// Computed measurement value (length, area, or perimeter depending on type).
+    /// </summary>
+    public double MeasuredValue { get; set; }
+
+    /// <summary>
+    /// Label text shown on the measurement annotation.
+    /// </summary>
+    public string? MeasureLabel { get; set; }
+
     public PdfAnnotation Clone()
     {
         return new PdfAnnotation
@@ -119,7 +144,11 @@ public class PdfAnnotation
             StampText = StampText,
             NoteContent = NoteContent,
             NoteColor = NoteColor,
-            Rotation = Rotation
+            Rotation = Rotation,
+            MeasureUnit = MeasureUnit,
+            MeasureScale = MeasureScale,
+            MeasuredValue = MeasuredValue,
+            MeasureLabel = MeasureLabel
         };
     }
 }

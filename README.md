@@ -15,8 +15,8 @@ A comprehensive, open-source PDF editor built with C# and Avalonia UI, integrati
 - Dark/light theme switching
 
 **Export System**
-- Provider-based export architecture (`IExportProvider`)
-- Export formats: PNG, JPEG, TIFF, BMP, WebP, Plain Text, HTML, Microsoft Word (DOCX)
+- Provider-based export architecture (`IExportProvider`) with 15 format providers
+- Export formats: PNG, JPEG, TIFF, BMP, WebP, Plain Text, HTML, DOCX, XLSX, RTF, Markdown, CSV, JSON, PPTX, EPUB, LaTeX, ODT, ODP, ODS
 - Unified export dialog with format selection, DPI/quality control, page range, and progress
 - Images-to-PDF conversion
 
@@ -41,13 +41,42 @@ A comprehensive, open-source PDF editor built with C# and Avalonia UI, integrati
 - Session save/restore
 - Cross-platform: Windows, Linux, macOS
 
+**Forms & Signatures**
+- PDF form detection, reading, filling, and flattening (AcroForms)
+- Form field creation (text, checkbox, dropdown, radio button, signature)
+- Digital signatures with PKCS#12 certificates (sign, verify, list)
+- Electronic signatures (draw, type, upload)
+- Form validation (13 rule types), calculation fields, conditional logic
+- Barcode generation (QR, Code128, Code39, EAN13, DataMatrix, PDF417)
+
+**Document Enhancement**
+- Direct text editing in PDF
+- Table detection, editing, and HTML/CSV export
+- Auto-crop, deskew, background removal for scanned documents
+- Image extraction, replacement, and compression
+- Font analysis and replacement
+- Table of contents auto-generation from headings
+- PDF/A archival conversion, PDF/X print production compliance
+
+**Review & Security**
+- Document comparison (text-level LCS diff + pixel-level visual diff)
+- Content redaction (area, text, page-level)
+- Metadata scrubber, document sanitizer
+- Accessibility checker (WCAG/PDF/UA audit), auto-tagging, alt text editor
+- Certificate manager (Windows Store, PFX inspection, chain validation)
+- XFDF annotation import/export (Adobe standard)
+
+**Productivity**
+- Quick actions (customizable macros with step-by-step execution)
+- Document templates (save, reuse, categorize, search)
+- Watch folder (auto-process dropped files)
+- Booklet creation for double-sided printing
+
 ### Planned
 - ClawPDF printer integration
-- Interactive PDF form handling
-- Digital signatures with certificates
-- Document comparison
-- Plugin system
-- Cloud integration
+- Ribbon UI toolbar redesign
+- SkiaSharp rendering migration
+- PDF optimization module
 
 ## Technology Stack
 

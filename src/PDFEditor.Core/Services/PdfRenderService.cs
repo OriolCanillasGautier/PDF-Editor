@@ -1,13 +1,20 @@
 using Docnet.Core;
 using Docnet.Core.Models;
+using NLog;
 
 namespace PDFEditor.Core.Services;
 
 /// <summary>
-/// Renders PDF pages to images using Docnet.Core (PDFium engine)
+/// Renders PDF pages to images using Docnet.Core (PDFium engine).
+/// All Docnet calls are serialised through a static lock to prevent
+/// the native PDFium library from being accessed concurrently (which
+/// can cause AccessViolationException crashes).
 /// </summary>
 public class PdfRenderService
 {
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static readonly object PdfiumLock = new();
+
     /// <summary>
     /// Renders a specific page of a PDF to BGRA pixel data
     /// </summary>
@@ -19,30 +26,33 @@ public class PdfRenderService
     public (byte[] pixels, int width, int height) RenderPage(
         byte[] pdfBytes, int pageIndex, int maxWidth = 1200, int maxHeight = 1600)
     {
-        using var docReader = DocLib.Instance.GetDocReader(
-            pdfBytes, new PageDimensions(maxWidth, maxHeight));
-        using var pageReader = docReader.GetPageReader(pageIndex);
-
-        var rawBytes = pageReader.GetImage();
-        var width = pageReader.GetPageWidth();
-        var height = pageReader.GetPageHeight();
-
-        // Blend transparent pixels with white background
-        for (int i = 0; i < rawBytes.Length; i += 4)
+        lock (PdfiumLock)
         {
-            byte a = rawBytes[i + 3];
-            if (a < 255)
-            {
-                float alpha = a / 255f;
-                float invAlpha = 1f - alpha;
-                rawBytes[i]     = (byte)(rawBytes[i]     * alpha + 255 * invAlpha); // B
-                rawBytes[i + 1] = (byte)(rawBytes[i + 1] * alpha + 255 * invAlpha); // G
-                rawBytes[i + 2] = (byte)(rawBytes[i + 2] * alpha + 255 * invAlpha); // R
-                rawBytes[i + 3] = 255;                                               // A
-            }
-        }
+            using var docReader = DocLib.Instance.GetDocReader(
+                pdfBytes, new PageDimensions(maxWidth, maxHeight));
+            using var pageReader = docReader.GetPageReader(pageIndex);
 
-        return (rawBytes, width, height);
+            var rawBytes = pageReader.GetImage();
+            var width = pageReader.GetPageWidth();
+            var height = pageReader.GetPageHeight();
+
+            // Blend transparent pixels with white background
+            for (int i = 0; i < rawBytes.Length; i += 4)
+            {
+                byte a = rawBytes[i + 3];
+                if (a < 255)
+                {
+                    float alpha = a / 255f;
+                    float invAlpha = 1f - alpha;
+                    rawBytes[i]     = (byte)(rawBytes[i]     * alpha + 255 * invAlpha); // B
+                    rawBytes[i + 1] = (byte)(rawBytes[i + 1] * alpha + 255 * invAlpha); // G
+                    rawBytes[i + 2] = (byte)(rawBytes[i + 2] * alpha + 255 * invAlpha); // R
+                    rawBytes[i + 3] = 255;                                               // A
+                }
+            }
+
+            return (rawBytes, width, height);
+        }
     }
 
     /// <summary>
@@ -50,9 +60,12 @@ public class PdfRenderService
     /// </summary>
     public int GetPageCount(byte[] pdfBytes)
     {
-        using var docReader = DocLib.Instance.GetDocReader(
-            pdfBytes, new PageDimensions(10, 10));
-        return docReader.GetPageCount();
+        lock (PdfiumLock)
+        {
+            using var docReader = DocLib.Instance.GetDocReader(
+                pdfBytes, new PageDimensions(10, 10));
+            return docReader.GetPageCount();
+        }
     }
 
     /// <summary>

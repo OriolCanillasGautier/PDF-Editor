@@ -1,7 +1,7 @@
 # Copilot Instructions for PDF Editor
 
-**Version:** 1.0  
-**Last Updated:** 2026-02-17
+**Version:** 1.3  
+**Last Updated:** 2026-02-18
 
 ---
 
@@ -29,7 +29,7 @@ At the end of EVERY work session, update this section in `PLAN.md`:
 
 | Date | Phase/Step | Changes Made | Files Updated |
 |------|------------|--------------|---------------|
-| 2026-02-17 | Phase 1 | Created copilot-instructions.md | .github/copilot-instructions.md |
+| 2026-02-18 | Phase 4 | Updated copilot-instructions.md | .github/copilot-instructions.md |
 ```
 
 ### Rule 3: Track Errors and Blockers
@@ -41,7 +41,8 @@ Maintain an active issues section in `PLAN.md`:
 
 | ID | Priority | Issue | Impact | Status | Owner |
 |----|----------|-------|--------|--------|-------|
-| ERR-001 | P1 | clawPDF wrapper not implemented | Blocking print-to-PDF | Open | - |
+| ERR-001 | P2 | ClawPDF wrapper not implemented | No print-to-PDF via virtual printer | Open | - |
+| ERR-002 | P3 | Tesseract requires tessdata files | Users must manually download language packs | Open | - |
 ```
 
 **Update this table:**
@@ -58,7 +59,9 @@ Document all architectural and design decisions:
 
 | Date | Decision | Rationale | Alternatives Considered |
 |------|----------|-----------|------------------------|
-| 2026-02-17 | Avalonia + ReactiveUI | Cross-platform, strong MVVM support | WPF (Windows-only), MAUI (immature) |
+| 2026-02-18 | Hybrid DOCX export | Best of both worlds: iText7 fallback + pdf2docx high-fidelity | Pure Python (deployment complexity), Pure iText7 (format issues) |
+| 2026-02-18 | Ribbon UI with UXWing SVG icons | Familiar Office-like UX, scalable icons | Keep current toolbar (overloaded), Custom icons (time-consuming) |
+| 2026-02-18 | SkiaSharp over Pdfium.Net | No native DLLs, GPU acceleration, built into Avalonia | Keep Pdfium (external dependency), Custom renderer (too complex) |
 ```
 
 ### Rule 5: Phase Status Must Be Accurate
@@ -71,8 +74,11 @@ Update phase status in real-time in `PLAN.md`:
 | Phase | Status | Started | Completed | Progress |
 |-------|--------|---------|-----------|----------|
 | Phase 1: Foundation | Complete | 2026-02-01 | 2026-02-14 | 100% |
-| Phase 2: Page Operations | In Progress | 2026-02-15 | - | 60% |
-| Phase 3: Image Processing | Not Started | - | - | 0% |
+| Phase 2: Page Operations | Complete | 2026-02-15 | 2026-02-17 | 100% |
+| Phase 3: Forms & Signatures | Complete | 2026-02-17 | 2026-02-17 | 100% |
+| Phase 4: Advanced Features | In Progress | 2026-02-18 | - | 85% |
+| Phase 5: Export Expansion | Not Started | - | - | 0% |
+| Phase 6-12: Optimization & Polish | Planned | - | - | 0% |
 ```
 
 **Update when:**
@@ -84,11 +90,13 @@ Update phase status in real-time in `PLAN.md`:
 
 ## Project Overview
 
-This is a **cross-platform PDF editor** built with C#, .NET 6, and Avalonia UI. It integrates multiple PDF libraries (iText7, PDFSharp, Pdfium/Docnet) to provide comprehensive PDF manipulation, viewing, annotation, and export capabilities.
+This is a **cross-platform PDF editor** built with C#, .NET 6+, and Avalonia UI. It integrates multiple PDF libraries (iText7, PDFSharp, Pdfium/Docnet, SkiaSharp) to provide comprehensive PDF manipulation, viewing, annotation, and export capabilities.
 
 **Key Goal:** Production-grade, open-source PDF editor with features comparable to Adobe Acrobat, licensed under AGPL v3.
 
-**Quality Standard:** Clean architecture, modular design, comprehensive testing, cross-platform compatibility (Windows, Linux, macOS).
+**Quality Standard:** Clean architecture, modular design, comprehensive testing (282+ passing tests), cross-platform compatibility (Windows, Linux, macOS).
+
+**Current State:** Feature-complete core editor with forms, signatures, OCR, annotations, comparison, redaction, and hybrid DOCX export. Ribbon UI and performance optimizations planned.
 
 ---
 
@@ -117,7 +125,7 @@ This is a **cross-platform PDF editor** built with C#, .NET 6, and Avalonia UI. 
 ┌─────────────────────────────────────────────┐
 │         UI Layer (Avalonia/MVVM)            │
 │     (PDFEditor.UI Project)                  │
-│  - MainWindow.axaml                         │
+│  - MainWindow.axaml (Ribbon toolbar)        │
 │  - ViewModels (ReactiveUI)                  │
 │  - Commands & Events                        │
 └─────────────────────────────────────────────┘
@@ -125,17 +133,17 @@ This is a **cross-platform PDF editor** built with C#, .NET 6, and Avalonia UI. 
 ┌─────────────────────────────────────────────┐
 │  Core Services Layer (Business Logic)       │
 │     (PDFEditor.Core Project)                │
-│  - IPdfDocument                             │
-│  - IImageProcessor                          │
-│  - IOcrEngine                               │
-│  - Service Implementations                  │
+│  - IPdfDocument, IExportProvider            │
+│  - IFormService, ISignatureService          │
+│  - IOcrEngine, IRedactionService            │
+│  - Service Implementations (20+ services)   │
 └─────────────────────────────────────────────┘
                       ↓
 ┌─────────────────────────────────────────────┐
 │  Integration Layer (External Tools)         │
-│  - ClawPDFIntegration                       │
-│  - Ghostscript Bridge                       │
-│  - Tesseract Bridge                         │
+│  - HybridDocxExportProvider (pdf2docx)      │
+│  - TesseractOcrService                      │
+│  - SkiaSharp Rendering (planned)            │
 └─────────────────────────────────────────────┘
 ```
 
@@ -145,22 +153,26 @@ This is a **cross-platform PDF editor** built with C#, .NET 6, and Avalonia UI. 
 PDF-Editor/
 ├── src/
 │   ├── PDFEditor.Core/              # Core business logic, services, abstractions
-│   │   ├── Abstractions/            # Interfaces (IPdfDocument, etc.)
-│   │   ├── Services/                # Implementations (ITextPdfService, etc.)
+│   │   ├── Abstractions/            # Interfaces (IPdfDocument, IExportProvider, etc.)
+│   │   ├── Services/                # Implementations (20+ services)
+│   │   │   ├── Export/              # Export providers (Docx, Xlsx, Html, etc.)
+│   │   │   └── ...                  # All service implementations
 │   │   └── AppConfig.cs             # Global configuration
 │   │
 │   ├── PDFEditor.UI/                # Avalonia desktop application
 │   │   ├── App.axaml                # Application entry point
-│   │   ├── MainWindow.axaml         # Main window UI
-│   │   └── ViewModels/              # MVVM ViewModels
+│   │   ├── MainWindow.axaml         # Main window UI (Ribbon toolbar)
+│   │   ├── ViewModels/              # MVVM ViewModels
+│   │   └── Resources/Icons/         # UXWing SVG icons
 │   │
 │   ├── PDFEditor.ClawPDFIntegration/# Bridge to clawPDF printer
 │   │   └── ClawPDFWrapper.cs        # Wrapper for clawPDF.exe
 │   │
-│   └── PDFEditor.Tests/             # Unit tests (xUnit)
+│   └── PDFEditor.Tests/             # Unit tests (xUnit, 282+ passing)
 │
 ├── docs/                            # Documentation
-├── .github/workflows/               # CI/CD
+├── .github/                         # CI/CD, copilot instructions
+├── PLAN.md                          # Master roadmap
 └── PDFEditor.sln                    # Visual Studio solution
 ```
 
@@ -174,8 +186,13 @@ public static class CoreServiceCollectionExtensions
     public static IServiceCollection AddPDFEditorCore(this IServiceCollection services)
     {
         services.AddSingleton<IPdfDocument, ITextPdfService>();
-        // services.AddSingleton<IImageProcessor, ImageProcessorService>();
-        // services.AddSingleton<IOcrEngine, OcrEngineService>();
+        services.AddSingleton<IExportProvider, HybridDocxExportProvider>();
+        services.AddSingleton<IFormService, PdfFormService>();
+        services.AddSingleton<ISignatureService, PdfSignatureService>();
+        services.AddSingleton<IOcrEngine, TesseractOcrService>();
+        services.AddSingleton<IRedactionService, PdfRedactionService>();
+        services.AddSingleton<IComparisonService, PdfComparisonService>();
+        // ... all other services
         return services;
     }
 }
@@ -229,16 +246,162 @@ public class MainViewModel : ReactiveObject
 
 All PDF operations in `PDFEditor.Core/Services/`:
 
-| Service | Purpose | Library |
-|---------|---------|---------|
-| `ITextPdfService` | Document manipulation (load, save, rotate, remove) | iText7 |
-| `PdfRenderService` | PDF → image rendering | Docnet.Core |
-| `PdfExportService` | Export to images/HTML/text | Magick.NET |
-| `PdfAnnotationService` | Annotation rendering/burning | iText7 |
-| `PdfSearchService` | Text extraction & search | iText7 |
-| `PdfSecurityService` | Password protection, encryption | iText7 |
-| `SessionService` | User session persistence | JSON |
-| `UndoRedoManager` | Command undo/redo stack | Custom |
+| Service | Purpose | Library | Status |
+|---------|---------|---------|--------|
+| `ITextPdfService` | Document manipulation (load, save, rotate, remove) | iText7 | ✅ Complete |
+| `PdfRenderService` | PDF → image rendering | Docnet.Core | ✅ Complete |
+| `PdfExportService` | Export to images/HTML/text | Magick.NET | ✅ Complete |
+| `PdfAnnotationService` | Annotation rendering/burning | iText7 | ✅ Complete |
+| `PdfSearchService` | Text extraction & search | iText7 | ✅ Complete |
+| `PdfSecurityService` | Password protection, encryption | iText7 | ✅ Complete |
+| `PdfFormService` | Form field detection, filling, creation | iText7 AcroForm | ✅ Complete |
+| `PdfSignatureService` | Digital signatures (PKCS#12) | iText7 + BouncyCastle | ✅ Complete |
+| `PdfRedactionService` | Content redaction (area, text, page) | iText7 | ✅ Complete |
+| `PdfComparisonService` | Document comparison (LCS diff) | Custom | ✅ Complete |
+| `TesseractOcrService` | OCR text recognition | Tesseract.NET | ✅ Complete |
+| `SearchablePdfService` | OCR overlay for scanned PDFs | Tesseract + iText7 | ✅ Complete |
+| `MeasurementService` | Ruler, area, perimeter tools | Custom (Shoelace) | ✅ Complete |
+| `FormValidationService` | Form field validation rules | Custom (13 rule types) | ✅ Complete |
+| `VisualDiffService` | Pixel-level page comparison | Magick.NET | ✅ Complete |
+| `XfdfAnnotationService` | XFDF annotation import/export | Custom | ✅ Complete |
+| `AnnotationExportService` | Annotation reports (text/HTML/CSV) | Custom | ✅ Complete |
+| `SessionService` | User session persistence | JSON | ✅ Complete |
+| `UndoRedoManager` | Command undo/redo stack | Custom | ✅ Complete |
+| `HybridDocxExportProvider` | DOCX export (iText7 + pdf2docx) | iText7 + Python | ✅ Complete |
+| `XlsxExportProvider` | Excel export with table detection | DocumentFormat.OpenXml | ✅ Complete |
+| `RtfExportProvider` | RTF format export | Custom | ✅ Complete |
+| `HtmlExportProvider` | HTML export with embedded images | iText7 | ✅ Complete |
+| `PdfOptimizer` | PDF compression, optimization | Planned | 🔲 Phase 12 |
+
+---
+
+## Ribbon UI Architecture
+
+### Tabbed Toolbar Structure
+
+The application uses a **9-tab ribbon interface** (Excel/Word-style) adapted for PDF workflows:
+
+```
+[File] [Home] [Edit] [Insert] [Draw] [Form] [Review] [View] [Help]
+```
+
+### Ribbon Tabs Definition
+
+| Tab | Purpose | Key Groups |
+|-----|---------|------------|
+| **File** | Document lifecycle | New, Open, Save, Export, Print, Properties, Close |
+| **Home** | Common actions | Undo/Redo, Select All, Copy/Paste, Zoom, Page Nav, Search |
+| **Edit** | Page/content editing | Delete, Rotate, Crop, Extract, Merge, Split, Reorder |
+| **Insert** | Add new content | Page, Image, Text Box, Signature, Barcode, Header/Footer |
+| **Draw** | Annotations & markup | Shapes, Freehand, Highlight, Underline, Note, Stamp, Measurement |
+| **Form** | Form handling | Detect, Fill, Add Field (Text/Checkbox/Dropdown), Flatten, Validate |
+| **Review** | Quality & security | OCR, Compare, Sign, Verify, Redact, Accessibility, Optimize |
+| **View** | Display options | Thumbnails, Bookmarks, Layers, Dark Mode, Full Screen, Fit Width/Height |
+| **Help** | Support | About, Keyboard Shortcuts, Documentation, Feedback |
+
+### Icon Strategy (UXWing)
+
+**Source**: https://uxwing.com/
+
+**License**: All icons **free for personal and commercial use** (per UXWing FAQ)
+
+**Available Formats**:
+- **Scalable Vector SVG** (recommended for large projects)
+- **Transparent background PNG** (fallback option)
+
+**Which Format to Use** (per UXWing):
+> "If you have a large project that needs a lot of icons, we suggest you go with **SVG Icons**, because PNG files would increase your overall file size. SVG is a vector format that works well in high-resolution retina display. Even SVG file size is low compared to PNG."
+
+**Implementation Guidelines**:
+- **Format**: **SVG** for all toolbar icons
+- **Style**: Monochrome, theme-aware (auto-adapts to light/dark)
+- **Size**: Design on 24x24 or 32x32 pixel grid for consistency
+- **No emojis**: Professional iconography only
+- **Labels**: Text labels shown by default; icons-only mode optional
+- **Storage**: `src/PDFEditor.UI/Resources/Icons/` folder
+- **Coloring**: Theme-aware via Avalonia styles
+
+**Icon List Needed** (approx 60 icons):
+```
+File: new-document, folder-open, save, export, print, properties, close
+Home: undo, redo, select-all, copy, paste, zoom-in, zoom-out, search
+Edit: delete, rotate-left, rotate-right, crop, extract, merge, split, move-up, move-down
+Insert: image, text-box, signature, barcode, header-footer, page-number, watermark
+Draw: highlight, underline, strikethrough, rectangle, ellipse, line, arrow, freehand, note, stamp, ruler, measure
+Form: form-detect, form-fill, form-add, form-edit, form-flatten, form-validate
+Review: ocr, compare, sign, verify, redact, accessibility, optimize, security
+View: thumbnails, bookmarks, layers, fullscreen, fit-width, fit-height, dark-mode
+Help: info, keyboard, book, feedback
+```
+
+---
+
+## Hybrid DOCX Export Workflow
+
+### Architecture
+
+```
+HybridDocxExportProvider
+├── Detect: Is Python + pdf2docx available?
+│   ├── YES + UseHighFidelityEngine=true → Use pdf2docx (high fidelity)
+│   └── NO or false → Fallback to DocxExportProvider (iText7, good fidelity)
+└── Always returns valid DOCX (never fails due to optional backend)
+```
+
+### Format Preservation Comparison
+
+| Element | iText7 Engine | pdf2docx (Python) |
+|---------|--------------|-------------------|
+| Text formatting | ✅ Good | ✅ Excellent |
+| Font detection | ⚠️ Approximate | ✅ Precise |
+| Paragraph layout | ⚠️ Basic | ✅ Advanced (columns, spacing) |
+| Tables | ⚠️ Heuristic detection | ✅ Structure-aware |
+| Merged cells | ⚠️ Limited | ✅ Full support |
+| Images | ✅ Embedded | ✅ Embedded + positioning |
+| Hyperlinks | ✅ Preserved | ✅ Preserved |
+| Headers/Footers | ❌ Not supported | ⚠️ Partial (TODO in pdf2docx) |
+| Complex layouts | ⚠️ May reflow | ✅ Better preservation |
+
+### Requirements for pdf2docx Backend
+- Python 3.8+ installed and in PATH
+- `pdf2docx` package installed via pip: `pip install pdf2docx`
+- AGPL-3.0 license compliance (or commercial license from Artifex)
+
+### UI Integration
+In Export Dialog:
+```
+☑ Use high-fidelity engine (requires Python + pdf2docx)
+  ⓘ Better layout preservation for complex documents
+  ⓘ Install pdf2docx: pip install pdf2docx
+  ⓘ License: AGPL-3.0
+```
+
+---
+
+## Technology Stack
+
+### Core Libraries
+
+| Library | Package | Version | Purpose | License |
+|---------|---------|---------|---------|---------|
+| Avalonia | `Avalonia` | 11.0.0+ | Cross-platform UI framework | MIT |
+| ReactiveUI | `Avalonia.ReactiveUI` | 11.0.0+ | MVVM framework | MIT |
+| iText7 | `itext7` | 7.2.5 | PDF manipulation | AGPL v3 |
+| Docnet | `Docnet.Core` | 2.6.0 | PDF rendering (Pdfium) | Apache 2.0 |
+| Magick.NET | `Magick.NET-Q16-AnyCPU` | 14.10.2+ | Image processing | Apache 2.0 |
+| Tesseract | `Tesseract` | 5.2.0 | OCR engine | Apache 2.0 |
+| NLog | `NLog` | 5.2.8 | Logging | BSD |
+| xUnit | `xunit` | 2.6.6 | Testing framework | Apache 2.0 |
+| Moq | `Moq` | 4.20.72 | Mocking library | BSD |
+| DocumentFormat.OpenXml | `DocumentFormat.OpenXml` | 3.0.1+ | DOCX/XLSX export | MIT |
+
+### Planned Additions
+
+| Library | Purpose | License | Phase |
+|---------|---------|---------|-------|
+| **SkiaSharp** | Replace Pdfium.Net for rendering | MIT | Phase 11 |
+| **QPdfSharp** | Linearization, advanced compression | Apache 2.0 | Phase 12 |
+| **QuestPDF** | Template-based PDF generation | MIT (< $1M) | Backlog |
 
 ---
 
@@ -253,7 +416,7 @@ dotnet restore
 # Build all projects
 dotnet build
 
-# Run tests
+# Run tests (282+ passing)
 dotnet test
 
 # Run application
@@ -328,21 +491,22 @@ dotnet publish src/PDFEditor.UI/PDFEditor.UI.csproj `
 | `PDFEditor.sln` | Visual Studio solution file |
 | `src/PDFEditor.UI/Program.cs` | Application entry point |
 | `src/PDFEditor.UI/App.axaml` | Application resources, styles |
-| `src/PDFEditor.UI/MainWindow.axaml` | Main window UI definition |
+| `src/PDFEditor.UI/MainWindow.axaml` | Main window UI definition (Ribbon) |
 | `src/PDFEditor.UI/MainWindow.axaml.cs` | Main window code-behind (event handlers) |
 | `src/PDFEditor.UI/ViewModels/MainViewModel.cs` | App-level ViewModel |
 | `src/PDFEditor.UI/ViewModels/DocumentTabViewModel.cs` | Per-document ViewModel |
 | `src/PDFEditor.Core/CoreServiceCollectionExtensions.cs` | DI registration |
 | `src/PDFEditor.Core/AppConfig.cs` | Global constants |
-| `src/PDFEditor.Core/Abstractions/IPdfDocument.cs` | Core document interface |
-| `src/PDFEditor.Core/Services/ITextPdfService.cs` | iText7 implementation |
-| `src/PDFEditor.ClawPDFIntegration/ClawPDFWrapper.cs` | clawPDF printer wrapper |
+| `src/PDFEditor.Core/Abstractions/` | All service interfaces |
+| `src/PDFEditor.Core/Services/Export/` | Export providers (6+ formats) |
+| `src/PDFEditor.Core/Services/HybridDocxExportProvider.cs` | Hybrid DOCX export |
+| `src/PDFEditor.UI/Resources/Icons/` | UXWing SVG icons |
 | `src/PDFEditor.UI/nlog.config` | NLog logging configuration |
 | `README.md` | Project overview |
 | `SETUP.md` | Developer setup guide |
-| `PLAN.md` | Implementation roadmap |
+| `PLAN.md` | Implementation roadmap (master doc) |
 | `docs/ARCHITECTURE.md` | Architecture documentation |
-| `docs/ROADMAP.md` | Phase-by-phase guide |
+| `.github/copilot-instructions.md` | This file - AI assistant guidelines |
 
 ---
 
@@ -350,7 +514,7 @@ dotnet publish src/PDFEditor.UI/PDFEditor.UI.csproj `
 
 ### C# Language Features
 
-- **Target:** .NET 6.0, C# 10+
+- **Target:** .NET 6.0+, C# 10+
 - **Nullable reference types:** Enabled (`<Nullable>enable</Nullable>`)
 - **Implicit usings:** Enabled (`<ImplicitUsings>enable</ImplicitUsings>`)
 - **Pattern matching:** Prefer `is` expressions over `as` casts
@@ -364,7 +528,7 @@ dotnet publish src/PDFEditor.UI/PDFEditor.UI.csproj `
 | Public methods | PascalCase | `LoadFromFile`, `SavePdf` |
 | Public properties | PascalCase | `PageCount`, `FilePath` |
 | Private fields | `_camelCase` | `_filePath`, `_pdfDocument` |
-| Interfaces | `I` prefix + PascalCase | `IPdfDocument`, `IImageProcessor` |
+| Interfaces | `I` prefix + PascalCase | `IPdfDocument`, `IExportProvider` |
 | Private readonly | `_camelCase` + type hint | `_logger`, `_service` |
 
 ### Logging Pattern
@@ -556,53 +720,50 @@ git push origin feature/your-feature-name
 
 | Library | Purpose | License | Status |
 |---------|---------|---------|--------|
-| **iText7** | PDF manipulation (load, save, merge, split) | AGPL v3 | Active |
-| **PDFSharp** | PDF creation from scratch | MIT |备用 |
-| **Docnet.Core** | PDF rendering to images (Pdfium wrapper) | Apache 2.0 | Active |
-| **Magick.NET** | Image format conversion | Apache 2.0 | Active |
+| **iText7** | PDF manipulation (load, save, merge, split) | AGPL v3 | ✅ Active |
+| **PDFSharp** | PDF creation from scratch | MIT | 🔲 Backup |
+| **Docnet.Core** | PDF rendering to images (Pdfium wrapper) | Apache 2.0 | ✅ Active |
+| **SkiaSharp** | Future rendering (built into Avalonia) | MIT | 🔲 Phase 11 |
+| **Magick.NET** | Image format conversion | Apache 2.0 | ✅ Active |
 
-### OCR Integration (Planned)
+### OCR Integration
 
 ```csharp
-// Interface (not yet implemented)
+// Implemented interface
 public interface IOcrEngine
 {
-    Task<string> RecognizeTextAsync(byte[] imageData, string language = "eng");
-    Task<List<OcrResult>> RecognizeTextRegionsAsync(byte[] imageData, string language = "eng");
+    Task<string> OcrPdfPageAsync(byte[] pdfBytes, int pageIndex, string language = "eng", int dpi = 300);
+    Task<string> OcrEntirePdfAsync(byte[] pdfBytes, string language = "eng", int dpi = 300, IProgress<(int, int)>? progress = null);
     List<string> GetSupportedLanguages();
+    bool IsAvailable { get; }
 }
 ```
+
+**Implementation:** `TesseractOcrService` (✅ Complete)
 
 **Libraries:**
-- Tesseract.NET (Apache 2.0)
-- PaddleOCR (Apache 2.0)
+- Tesseract.NET (Apache 2.0) - Implemented
+- PaddleOCR (Apache 2.0) - Planned alternative
 
-### clawPDF Integration (Partial)
+### pdf2docx Integration (Hybrid)
 
 ```csharp
-// Wrapper exists but not fully implemented
-public class ClawPDFWrapper
+// Hybrid provider with Python fallback
+public class HybridDocxExportProvider : IExportProvider
 {
-    public void PrintToPdf(string inputFile, string outputPath, string? printerName = null);
-    public void MergeDocuments(string[] inputFiles, string outputPath);
+    public async Task<ExportResult> ExportAsync(byte[] pdfBytes, ExportOptions options, CancellationToken ct);
+    public bool IsHighFidelityModeAvailable(); // Check if Python + pdf2docx available
+    public static Task<bool> InstallPdf2DocxAsync(string? pythonPath = null); // Install helper
 }
 ```
 
-**Status:** Wrapper class exists; full integration pending Phase 5.
+**Status:** ✅ Complete (Phase 10)
+
+**License:** AGPL-3.0 (requires compliance or commercial license from Artifex)
 
 ### External Dependencies
 
-| Component | Package | Version | Purpose |
-|-----------|---------|---------|---------|
-| Avalonia | `Avalonia` | 11.0.0 | Cross-platform UI framework |
-| ReactiveUI | `Avalonia.ReactiveUI` | 11.0.0 | MVVM framework |
-| iText7 | `itext7` | 7.2.5 | PDF manipulation |
-| Docnet | `Docnet.Core` | 2.6.0 | PDF rendering |
-| Magick.NET | `Magick.NET-Q16-AnyCPU` | 14.10.2 | Image processing |
-| Tesseract | `Tesseract` | 5.2.0 | OCR engine |
-| NLog | `NLog` | 5.2.8 | Logging |
-| xUnit | `xunit` | 2.6.6 | Testing framework |
-| Moq | `Moq` | 4.20.72 | Mocking library |
+See **Technology Stack** table above for complete list.
 
 ---
 
@@ -617,6 +778,7 @@ public class ClawPDFWrapper
 | `dotnet build` fails with missing references | Run `dotnet restore` first. Check all `.csproj` files have correct `<ProjectReference>` paths |
 | Application crashes on startup | Check `nlog.config` is copied to output. Review logs in `%APPDATA%/PDF Editor/logs/` |
 | Theme not switching | Ensure `Application.Current.RequestedThemeVariant` is set in both `App.axaml` and code-behind |
+| Icons not loading | Verify SVG files in `Resources/Icons/`; check build action is `AvaloniaResource` |
 
 ### PDF Operations
 
@@ -628,6 +790,7 @@ public class ClawPDFWrapper
 | Text extraction returns empty | PDF may be scanned image (no text layer); use OCR instead |
 | Rotate doesn't persist | Call `SaveToFile` after rotation; verify document is not read-only |
 | Merge produces corrupt PDF | Ensure all source PDFs are valid; check iText7 version compatibility |
+| DOCX won't open in Word | Check `[Content_Types].xml` structure; verify image formats (JPEG/PNG only) |
 
 ### UI & ViewModels
 
@@ -639,6 +802,7 @@ public class ClawPDFWrapper
 | Annotations not visible | Verify `AnnotationCanvas` is rendered; check Z-index; ensure `IsAnnotationMode` is true |
 | Thumbnail list not updating | Ensure `ObservableCollection` is used; call `PropertyChanged` for collection changes |
 | Keyboard shortcuts not working | Check `OnKeyDown` override in `MainWindow`; verify no other control has focus |
+| Ribbon tabs not showing | Check `MainWindow.axaml` tab definitions; verify DataContext is set |
 
 ### Testing
 
@@ -654,8 +818,8 @@ public class ClawPDFWrapper
 
 | Issue | Resolution |
 |-------|------------|
-| clawPDF not detected | Verify `clawPDF.exe` path; check printer is installed in Windows; run as administrator |
 | Tesseract OCR fails | Download language data files (`.traineddata`); set `TESSDATA_PREFIX` environment variable |
+| pdf2docx not detected | Run `pip install pdf2docx`; verify Python in PATH; check `HybridDocxExportProvider.IsHighFidelityModeAvailable()` |
 | Image export produces wrong colors | Magick.NET uses BGRA pixel order; verify `PixelMapping` in `ReadPixels` |
 | Session not restoring | Check `%APPDATA%/PDF Editor/session.json` exists and is valid JSON |
 | NLog not writing | Verify `nlog.config` has correct targets; check file permissions for log directory |
@@ -668,6 +832,7 @@ public class ClawPDFWrapper
 | High memory usage | Dispose `PdfDocument` after use; clear thumbnail cache; limit undo stack size |
 | Slow thumbnail rendering | Reduce DPI for thumbnails (72-96); cache rendered images |
 | UI lag during export | Run export in background thread; use `Progress<T>` for progress updates |
+| Slow startup | Lazy load optional features; async initialization; splash screen with progress |
 
 **When you fix a bug, document it in the Change Log in `PLAN.md`.**
 
@@ -682,13 +847,24 @@ src/PDFEditor.Tests/
 ├── Core/
 │   ├── PdfDocumentTests.cs
 │   ├── PdfExportServiceTests.cs
-│   └── PdfAnnotationServiceTests.cs
+│   ├── PdfFormServiceTests.cs
+│   ├── PdfSignatureServiceTests.cs
+│   ├── PdfRedactionServiceTests.cs
+│   ├── PdfComparisonServiceTests.cs
+│   ├── AnnotationExportServiceTests.cs
+│   ├── XfdfAnnotationServiceTests.cs
+│   ├── MeasurementServiceTests.cs
+│   ├── FormValidationServiceTests.cs
+│   ├── VisualDiffServiceTests.cs
+│   └── SearchablePdfServiceTests.cs
 ├── ViewModels/
 │   ├── MainViewModelTests.cs
 │   └── DocumentTabViewModelTests.cs
 └── Integration/
     └── EndToEndTests.cs
 ```
+
+**Current Status:** 282+ passing tests across 21 test files
 
 ### Test Patterns
 
@@ -808,6 +984,8 @@ public async Task ExportCommand_Executes_ReturnsImageData()
 | Phase 3-4 | 60%+ |
 | Phase 5+ | 80%+ |
 
+**Current:** ~75% (Phase 4)
+
 ---
 
 ## Production Requirements
@@ -822,33 +1000,37 @@ All code must support these production-grade features:
 | Memory management | Dispose PDF documents; avoid leaks |
 | Performance | Lazy loading for large PDFs; async operations |
 | Security | Handle encrypted PDFs; validate inputs |
-| Accessibility | Keyboard navigation; screen reader support |
+| Accessibility | Keyboard navigation; screen reader support (WCAG 2.1 AA target) |
 | Localization | String resources externalized (future) |
 | Auto-update | ClickOnce or Squirrel (future) |
+| Icon licensing | UXWing SVG (free for commercial use) |
 
 ---
 
-## Repository Structure
+## External Resources
 
-```
-PDF-Editor/
-├── .github/
-│   ├── copilot-instructions.md   # This file
-│   └── workflows/
-│       └── build.yml             # CI/CD: build, test, publish
-├── src/                          # Main projects (exists)
-├── docs/                         # Documentation (exists)
-├── artifacts/                    # Build artifacts (exists)
-├── installer/                    # WiX installer (exists)
-├── .gitignore                    # Git ignore rules (exists)
-├── PDFEditor.sln                 # Solution file (exists)
-├── README.md                     # Project overview (exists)
-├── SETUP.md                      # Developer setup (exists)
-├── PLAN.md                       # Master roadmap (exists)
-├── CONTRIBUTING.md               # Contribution guidelines (exists)
-├── CHANGELOG.md                  # Version history (exists)
-└── LICENSE                       # AGPL v3 license (exists)
-```
+### Icon Library
+- **UXWing**: https://uxwing.com/
+  - All icons free for personal and commercial use
+  - Formats: SVG (recommended), PNG
+  - SVG recommended for large projects (smaller file size, retina support)
+  - Constantly updated with new icons
+  - FAQ: https://uxwing.com/frequently-asked-questions/
+
+### Libraries & Tools
+- **pdf2docx**: https://github.com/ArtifexSoftware/pdf2docx (AGPL-3.0)
+- **QPdfSharp (PdfPig)**: https://github.com/UglyToad/PdfPig (Apache 2.0)
+- **QuestPDF**: https://github.com/QuestPDF/QuestPDF (MIT for < $1M revenue)
+- **SkiaSharp**: https://github.com/mono/SkiaSharp (MIT)
+- **Avalonia UI**: https://github.com/AvaloniaUI/Avalonia (MIT)
+- **iText7**: https://github.com/itext/itext7 (AGPL v3)
+- **Tesseract.NET**: https://github.com/charlesw/tesseract (Apache 2.0)
+- **Magick.NET**: https://github.com/dlemstra/Magick.NET (Apache 2.0)
+
+### Inspiration Projects
+- **DesktopPDFConverter**: https://github.com/SirTaphos/DesktopPDFConverter
+- **PDF_Editor (Simple)**: https://github.com/topics/pdf?l=c%23
+- **Readiris PDF 23**: Avalonia-based production PDF app (proof of concept)
 
 ---
 
@@ -866,6 +1048,8 @@ When helping with this codebase, ALWAYS:
 8. **Update documentation** - every change must be reflected in relevant .md files
 9. **Log the change** - add entry to Change Log in `PLAN.md`
 10. **Track issues** - if something is broken, add to Active Issues table in `PLAN.md`
+11. **Use UXWing SVG icons** for any new UI elements (free for commercial use)
+12. **Respect license compatibility** - AGPL v3 for iText7/pdf2docx, MIT/Apache for others
 
 ---
 
@@ -875,6 +1059,8 @@ When helping with this codebase, ALWAYS:
 |---------|------|---------|
 | 1.0 | 2026-02-17 | Initial version based on Aerodynamic Pressure Mapping template |
 | 1.1 | 2026-02-17 | Added testing examples (service, ViewModel, mocking, async commands); expanded troubleshooting section with 30+ issues across 6 categories |
+| 1.2 | 2026-02-18 | Added HybridDocxExportProvider, ribbon UI architecture, UXWing icon guidelines, SkiaSharp migration path, PDF optimization module, updated service table (20+ services), external resources section |
+| 1.3 | 2026-02-18 | Consolidated version; added complete ribbon tab definitions, format preservation comparison table, test structure with 282+ tests, production requirements, AI assistant checklist updates |
 
 ---
 
@@ -889,9 +1075,27 @@ When helping with this codebase, ALWAYS:
 | Add feature | `PLAN.md` (Change Log), `README.md` (Features) |
 | Defer feature | `maybe-later.md` (create if needed) |
 | Change dependency | `README.md` (Technology Stack), `*.csproj` |
-| Change UI | `docs/ARCHITECTURE.md` (UI section) |
-| Add service | `docs/ARCHITECTURE.md` (Services table) |
+| Change UI | `docs/ARCHITECTURE.md` (UI section), ribbon tab definitions |
+| Add service | `docs/ARCHITECTURE.md` (Services table), this file |
 | Start phase | `PLAN.md` (Phase Status) |
 | Complete phase | `PLAN.md` (Phase Status, Change Log) |
+| Add icons | Download from UXWing, save to `Resources/Icons/`, update icon list |
 
 **Documentation is not optional. It is part of the definition of done.**
+
+---
+
+## License Reminders
+
+| Component | License | Your Project Impact |
+|-----------|---------|-------------------|
+| iText7 | AGPL-3.0 | Your code must be AGPL if distributed, or buy commercial license |
+| pdf2docx | AGPL-3.0 | Same as iText7 (optional backend) |
+| Avalonia | MIT | ✅ No restrictions |
+| UXWing Icons | Free for commercial use | ✅ No restrictions (per https://uxwing.com/) |
+| PdfPig | Apache 2.0 | ✅ No restrictions |
+| SkiaSharp | MIT | ✅ No restrictions |
+| Tesseract.NET | Apache 2.0 | ✅ No restrictions |
+| Magick.NET | Apache 2.0 | ✅ No restrictions |
+
+**Recommendation:** Keep AGPL components optional where possible. Default to MIT/Apache-licensed libs (PdfPig, SkiaSharp, PDFSharp) for core features if you want permissive licensing options.
