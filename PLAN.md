@@ -8,6 +8,7 @@ This document outlines the planned improvements and features for the PDF Editor 
 
 | Date | Phase/Step | Changes Made | Files Updated |
 |------|------------|--------------|---------------|
+| 2026-02-18 | CI/CD | Fix fontconfig test host crash: add libfontconfig1/libgdiplus, fc-cache, FONTCONFIG_PATH/FILE env vars | `.github/workflows/build.yml` |
 | 2026-02-18 | Analysis | Comprehensive gap analysis: identified 30 DI-registered services with no UI, 55 unchecked PLAN.md items, prioritized 28 implementation tasks | `PLAN.md` |
 | 2026-02-17 | Phase 1, Step 1 | Enhanced About dialog with GitHub link, version info, license, library credits | `MainWindow.axaml.cs` |
 | 2026-02-17 | Phase 1, Step 2 | Created IExportProvider interface, ExportResult, ExportOptions, ExportProgress | `Core/Abstractions/IExportProvider.cs` |

@@ -39,9 +39,13 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y fontconfig fonts-dejavu fonts-liberation
+        sudo apt-get install -y fontconfig libfontconfig1 libgdiplus fonts-dejavu fonts-liberation
+        fc-cache -fv
 
     - name: Test with coverage
+      env:
+        FONTCONFIG_PATH: /etc/fonts
+        FONTCONFIG_FILE: /etc/fonts/fonts.conf
       run: >
         dotnet test --configuration Release --no-build --verbosity normal
         /p:CollectCoverage=true
