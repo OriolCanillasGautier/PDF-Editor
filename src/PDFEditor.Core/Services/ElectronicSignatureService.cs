@@ -39,7 +39,7 @@ public class ElectronicSignatureService
     /// <summary>
     /// Generates a typed signature image from text (e.g., name) rendered as dark blue text on transparent background.
     /// </summary>
-    public byte[] CreateTypedSignature(string name, string fontFamily = "Segoe Script", int fontSize = 48)
+    public byte[] CreateTypedSignature(string name, string fontFamily = "DejaVu Sans", int fontSize = 48)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Signer name cannot be empty", nameof(name));

@@ -40,6 +40,8 @@ public class ITextPdfService : IPdfDocument
 
     public void LoadFromFile(string filePath)
     {
+        if (string.IsNullOrWhiteSpace(filePath))
+            throw new ArgumentException("File path cannot be empty or null", nameof(filePath));
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"PDF file not found: {filePath}");
 
