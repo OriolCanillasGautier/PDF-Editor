@@ -116,26 +116,155 @@ Follow the installation wizard
 
 ### For Developers
 
-1. **Install Prerequisites**
-   ```powershell
-   # .NET SDK 6.0+
-   # Visual Studio 2022 Community (free)
-   # Git
-   ```
+#### Prerequisites
 
-2. **Clone Repository**
-   ```bash
-   git clone https://github.com/ocanillas/PDF-Editor.git
-   cd PDF-Editor
-   ```
+Before getting started, ensure you have the following installed:
 
-3. **Build & Run**
-   ```bash
-   dotnet restore
-   dotnet build
-   cd src/PDFEditor.UI
-   dotnet run
-   ```
+1. **[.NET SDK 6.0+](https://dotnet.microsoft.com/en-us/download)** — Required to build and run
+2. **[Visual Studio 2022 Community](https://visualstudio.microsoft.com/vs/community/)** (recommended) or **Visual Studio Code**
+3. **[Git](https://git-scm.com/)** — Version control
+4. **[WiX Toolset v3.x](https://wixtoolset.org/download/)** — For building the MSI installer (Windows only)
+5. **Optional**: [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) language data files for OCR testing
+
+#### Step 1: Clone & Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/OriolCanillasGautier/PDF-Editor.git
+cd PDF-Editor
+
+# Restore all NuGet dependencies
+dotnet restore
+```
+
+#### Step 2: Build the Project
+
+```bash
+# Build in Release configuration (recommended)
+dotnet build --configuration Release
+
+# Or build in Debug for development
+dotnet build --configuration Debug
+```
+
+#### Step 3: Run the Application
+
+**Option A: Use dotnet**
+```bash
+dotnet run --project src/PDFEditor.UI/PDFEditor.UI.csproj
+```
+
+**Option B: Use Visual Studio**
+1. Open `PDFEditor.sln` in Visual Studio 2022
+2. Set `PDFEditor.UI` as the startup project (right-click → Set as Startup Project)
+3. Press `F5` to debug or `Ctrl+F5` to run
+
+#### Step 4: Run Tests
+
+```bash
+# Run all unit tests
+dotnet test
+
+# Run with detailed output
+dotnet test --verbosity normal
+
+# Run specific test project
+dotnet test src/PDFEditor.Tests/PDFEditor.Tests.csproj
+
+# Run with code coverage
+dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
+```
+
+#### Building the MSI Installer (Windows Only)
+
+To create a Windows installer (.msi):
+
+```powershell
+# Make sure WiX Toolset is installed
+# Then run the build script from PowerShell:
+
+cd installer
+.\build-installer.ps1
+```
+
+**What it does:**
+1. Publishes the app to `artifacts/publish/`
+2. Reads the version from `Directory.Build.props`
+3. Builds the MSI using WiX Toolset
+4. Output: `installer/PDFEditor-Setup-win-x64.msi`
+
+**To build with a custom version:**
+```powershell
+.\build-installer.ps1 -AppVersion "1.2.3"
+```
+
+**Version Management:**
+- The app version is defined in [`Directory.Build.props`](Directory.Build.props) at the repository root
+- Change the `<Version>` tag to update the version for all assemblies and the MSI
+- This version will automatically flow to NuGet packages, the MSI, and GitHub releases
+
+#### Making a GitHub Release
+
+**Automatic via Git Tags (Recommended):**
+
+```bash
+# Ensure all changes are committed
+git add .
+git commit -m "Release v1.2.3"
+
+# Create an annotated tag
+git tag -a v1.2.3 -m "Version 1.2.3"
+
+# Push the tag to GitHub
+git push origin v1.2.3
+```
+
+This triggers the **GitHub Actions CI/CD pipeline**, which will:
+1. Build the project on Windows and Linux
+2. Run all tests
+3. Generate code coverage reports
+4. Build the MSI installer
+5. Create a GitHub Release with the MSI attached
+
+**To view the release:**
+- Go to [Releases](https://github.com/OriolCanillasGautier/PDF-Editor/releases)
+- The MSI will be automatically attached
+
+**Manual Release (if needed):**
+1. Build locally: `.\installer\build-installer.ps1`
+2. Go to [GitHub Releases](https://github.com/OriolCanillasGautier/PDF-Editor/releases)
+3. Click "Draft a new release"
+4. Name it `v1.2.3`, attach the MSI, and publish
+
+#### Key Files for Developers
+
+- **[Directory.Build.props](Directory.Build.props)** — Central version management
+- **[PDFEditor.sln](PDFEditor.sln)** — Main solution file
+- **[src/PDFEditor.UI/](src/PDFEditor.UI/)** — Avalonia UI application
+- **[src/PDFEditor.Core/](src/PDFEditor.Core/)** — Business logic & services
+- **[src/PDFEditor.Tests/](src/PDFEditor.Tests/)** — Unit tests (500+ tests)
+- **[installer/](installer/)** — MSI installer source
+- **[SETUP.md](SETUP.md)** — Detailed setup troubleshooting
+- **[.github/workflows/](../.github/workflows/)** — CI/CD configuration
+
+#### Troubleshooting
+
+**Build fails with missing NuGet packages:**
+```bash
+dotnet nuget locals all --clear
+dotnet restore
+```
+
+**Visual Studio designer doesn't show UI:**
+- The Avalonia designer may not render in VS 2022; edit the XAML directly or run the app to see changes
+
+**MSI build fails:**
+- Ensure WiX Toolset v3.x is installed: `choco install wixtoolset`
+- Set the Windows PATH to include WiX bin folder
+
+**Tests fail with "Tesseract not found":**
+- Install Tesseract OCR and download language data files
+- Set the `TESSDATA_PREFIX` environment variable to point to the tessdata directory
 
 ## Documentation
 
@@ -163,21 +292,6 @@ PDF-Editor/
 ├── docs/                            # Documentation
 ├── installer/                       # WiX installer
 └── artifacts/                       # Build artifacts
-```
-
-## Quick Start for Developers
-
-1. Open `PDFEditor.sln` in Visual Studio 2022
-2. Right-click solution → "Restore NuGet Packages"
-3. Build solution (Ctrl+Shift+B)
-4. Set `PDFEditor.UI` as startup project
-5. Press F5 to run
-
-For command line:
-```bash
-dotnet restore
-dotnet build
-dotnet run --project src/PDFEditor.UI
 ```
 
 ## Contributing
@@ -222,8 +336,8 @@ See [LICENSE](LICENSE) for details.
 
 ## Community & Support
 
-- **Issues**: [GitHub Issues](https://github.com/ocanillas/PDF-Editor/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ocanillas/PDF-Editor/discussions)
+- **Issues**: [GitHub Issues](https://github.com/OriolCanillasGautier/PDF-Editor/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/OriolCanillasGautier/PDF-Editor/discussions)
 - **Documentation**: [See docs/](docs/)
 
 ## Credits

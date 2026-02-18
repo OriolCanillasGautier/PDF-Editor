@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="PDF Editor"
+    Manufacturer="PDF-Editor"
+    Version="$(var.AppVersion)"
+    UpgradeCode="d85a2d64-8384-4a34-bc3a-d63799bb3b39"
+    InstallScope="perUser">
+    <!--
+      MajorUpgrade: detects any installed version with the same UpgradeCode.
+      When installing a higher version it removes the old one first (no double-install).
+      AllowSameVersionUpgrades lets you reinstall the same version (useful during dev).
+    -->
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+      AllowSameVersionUpgrades="yes"
+      Schedule="afterInstallInitialize" />
+    <Media Id="1" Cabinet="PDFEditor.cab" EmbedCab="yes" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="PDF Editor" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="StartMenuDir" Name="PDF Editor" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="PDF Editor" Level="1">
+      <ComponentGroupRef Id="PublishedFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <UI>
+      <WixUI Id="WixUI_Minimal" />
+    </UI>
+  </Package>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <ComponentGroup Id="PublishedFiles">
+        <Files Include="$(var.PublishDir)\**\*" />
+      </ComponentGroup>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="StartMenuDir">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut
+          Id="StartMenuShortcutFile"
+          Name="PDF Editor"
+          Description="PDF Editor"
+          Target="[INSTALLFOLDER]PDFEditor.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\PDF-Editor\PDFEditor" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

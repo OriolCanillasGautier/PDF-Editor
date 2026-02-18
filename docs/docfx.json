@@ -1,0 +1,42 @@
+{
+  "metadata": {
+    "src": [
+      {
+        "files": [ "src/PDFEditor.Core/**.cs" ],
+        "src": "../",
+        "exclude": [ "**/bin/**", "**/obj/**" ]
+      }
+    ],
+    "globalNamespaceId": "PDFEditor",
+    "disableGitFeatures": false
+  },
+  "build": {
+    "content": [
+      {
+        "files": [ "**.md", "**.yml" ],
+        "src": ".",
+        "dest": "."
+      },
+      {
+        "files": [ "api/**.yml" ],
+        "dest": "api"
+      }
+    ],
+    "resource": [
+      {
+        "files": [ "images/**" ]
+      }
+    ],
+    "dest": "_site",
+    "globalMetadata": {
+      "_appTitle": "PDF Editor Documentation",
+      "_appFooter": "PDF Editor — AGPL v3 Open Source",
+      "_enableSearch": true,
+      "_appLogoPath": "images/logo.png"
+    },
+    "template": [ "default", "modern" ],
+    "postProcessors": [],
+    "keepFileLink": false,
+    "disableGitFeatures": false
+  }
+}

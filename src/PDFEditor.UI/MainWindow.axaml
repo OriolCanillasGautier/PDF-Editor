@@ -71,6 +71,16 @@
             <Setter Property="Stretch" Value="Uniform" />
             <Setter Property="Fill" Value="White" />
         </Style>
+        <!-- Right panel collapsible section -->
+        <Style Selector="Expander.rp-section">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Margin" Value="0,1,0,1" />
+        </Style>
+        <Style Selector="Expander.rp-section /template/ ToggleButton">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
     </Window.Styles>
 
     <Window.Resources>
@@ -141,11 +151,20 @@
                            Text="{Binding ActiveTab.SelectionInfoText, FallbackValue=''}"
                            FontSize="11" VerticalAlignment="Center" Opacity="0.6"
                            Margin="0,0,12,0" />
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="{Binding ActiveTab.PageInfoText, FallbackValue=''}"
                                FontSize="11" VerticalAlignment="Center" Opacity="0.5" />
-                    <TextBlock Text="{Binding ActiveTab.ZoomPercent, FallbackValue=''}"
-                               FontSize="11" VerticalAlignment="Center" Opacity="0.5" />
+                    <Button Classes="tb" Click="OnContextZoomOutClick" Padding="2" ToolTip.Tip="Zoom Out">–</Button>
+                    <Slider Minimum="0.25" Maximum="4.0"
+                            Value="{Binding ActiveTab.ZoomLevel, FallbackValue=1.0}"
+                            Width="90" VerticalAlignment="Center"
+                            TickFrequency="0.25" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="Zoom (drag to resize)"
+                            ValueChanged="OnZoomSliderChanged" />
+                    <TextBlock Text="{Binding ActiveTab.ZoomPercent, FallbackValue='100%'}"
+                               FontSize="11" VerticalAlignment="Center" Opacity="0.7" Width="38" />
+                    <Button Classes="tb" Click="OnContextZoomInClick" Padding="2" ToolTip.Tip="Zoom In">+</Button>
+                    <Button Classes="tb" Click="OnContextZoomFitClick" FontSize="10" Padding="3,1" ToolTip.Tip="Zoom to Fit">Fit</Button>
                 </StackPanel>
             </Grid>
         </Border>
@@ -230,6 +249,13 @@
                     <MenuItem Header="_Add Text Field" Click="OnAddTextFieldClick" />
                     <MenuItem Header="Add _Checkbox" Click="OnAddCheckboxFieldClick" />
                     <MenuItem Header="Add _Dropdown" Click="OnAddDropdownFieldClick" />
+                    <MenuItem Header="Add _Radio Button" Click="OnAddRadioButtonFieldClick" />
+                    <MenuItem Header="Add Si_gnature Field" Click="OnAddSignatureFieldClick2" />
+                    <Separator />
+                    <MenuItem Header="Edit Field _Properties..." Click="OnEditFieldPropertiesClick" />
+                    <MenuItem Header="Calculation _Rules..." Click="OnCalculationFieldsClick" />
+                    <MenuItem Header="Co_nditional Logic..." Click="OnConditionalLogicClick" />
+                    <MenuItem Header="Form _Validation..." Click="OnFormValidationClick" />
                 </MenuItem>
                 <MenuItem Header="Digital _Signatures">
                     <MenuItem Header="_Sign Document..." Click="OnSignDocumentClick" />
@@ -237,6 +263,7 @@
                     <MenuItem Header="List Si_gnatures" Click="OnListSignaturesClick" />
                     <Separator />
                     <MenuItem Header="_Add Signature Field" Click="OnAddSignatureFieldClick" />
+                    <MenuItem Header="_Electronic Signature..." Click="OnElectronicSignatureClick" />
                     <Separator />
                     <MenuItem Header="_Certificate Manager..." Click="OnCertificateManagerClick" />
                 </MenuItem>
@@ -251,9 +278,55 @@
                 <MenuItem Header="_Security">
                     <MenuItem Header="_Encrypt / Set Permissions..." Click="OnPermissionManagerClick" />
                     <MenuItem Header="_Decrypt Document..." Click="OnDecryptDocumentClick" />
+                    <MenuItem Header="_Metadata Scrubber..." Click="OnMetadataScrubberClick" />
+                    <MenuItem Header="S_anitize Document..." Click="OnSanitizeDocumentClick" />
                 </MenuItem>
                 <Separator />
                 <MenuItem Header="Export Annotation Re_port..." Click="OnExportAnnotationReportClick" />
+                <MenuItem Header="_Import Annotations (XFDF)..." Click="OnImportXfdfClick" />
+                <MenuItem Header="E_xport Annotations (XFDF)..." Click="OnExportXfdfClick" />
+                <MenuItem Header="Annotation _Properties..." Click="OnAnnotationPropertiesClick" />
+                <MenuItem Header="Annotation Lis_t..." Click="OnAnnotationListClick" />
+                <Separator />
+                <MenuItem Header="Docu_ment Processing">
+                    <MenuItem Header="_Auto-Crop..." Click="OnAutoCropClick" />
+                    <MenuItem Header="_Deskew Pages..." Click="OnDeskewClick" />
+                    <MenuItem Header="_Background Removal..." Click="OnBackgroundRemovalClick" />
+                    <Separator />
+                    <MenuItem Header="_Header/Footer..." Click="OnHeaderFooterClick" />
+                    <MenuItem Header="Table of _Contents..." Click="OnTableOfContentsClick" />
+                    <MenuItem Header="_Booklet Creation..." Click="OnBookletClick" />
+                    <MenuItem Header="Print to _PDF..." Click="OnPrintToPdfClick" />
+                </MenuItem>
+                <MenuItem Header="Te_xt &amp; Content">
+                    <MenuItem Header="_Find &amp; Replace..." Click="OnFindReplaceClick" />
+                    <MenuItem Header="_Font Analysis..." Click="OnFontAnalysisClick" />
+                    <MenuItem Header="Font _Replacement..." Click="OnFontReplacementClick" />
+                    <MenuItem Header="_Table Editor..." Click="OnTableEditorClick" />
+                </MenuItem>
+                <MenuItem Header="Ima_ge Tools">
+                    <MenuItem Header="_Extract All Images..." Click="OnExtractImagesClick" />
+                    <MenuItem Header="_Compress Images..." Click="OnCompressImagesClick" />
+                    <MenuItem Header="_Replace Image..." Click="OnReplaceImageClick" />
+                    <MenuItem Header="Insert _Barcode..." Click="OnInsertBarcodeClick" />
+                </MenuItem>
+                <MenuItem Header="Acc_essibility">
+                    <MenuItem Header="_Check Accessibility..." Click="OnAccessibilityCheckClick" />
+                    <MenuItem Header="_Auto-Tag PDF..." Click="OnAutoTagClick" />
+                    <MenuItem Header="Alt _Text Editor..." Click="OnAltTextEditorClick" />
+                </MenuItem>
+                <MenuItem Header="Arc_hiving">
+                    <MenuItem Header="Convert to _PDF/A..." Click="OnConvertPdfAClick" />
+                    <MenuItem Header="Inspect PDF/_A Conformance..." Click="OnInspectPdfAClick" />
+                    <MenuItem Header="Convert to PDF/_X..." Click="OnConvertPdfXClick" />
+                    <MenuItem Header="Inspect PDF/X..." Click="OnInspectPdfXClick" />
+                </MenuItem>
+                <MenuItem Header="_Productivity">
+                    <MenuItem Header="_Quick Actions..." Click="OnQuickActionsClick" />
+                    <MenuItem Header="_Templates..." Click="OnTemplatesClick" />
+                    <MenuItem Header="_Watch Folder..." Click="OnWatchFolderClick" />
+                    <MenuItem Header="Custom _Stamp..." Click="OnCustomStampClick" />
+                </MenuItem>
             </MenuItem>
             <MenuItem Header="_Annotate">
                 <MenuItem Header="Toggle Annotation _Mode" Click="OnToggleAnnotationMode" />
@@ -416,12 +489,20 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Orientation="Horizontal" Spacing="4">
+                                <StackPanel.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Close Tab" Click="OnCloseSpecificTabClick" />
+                                        <MenuItem Header="Close Other Tabs" Click="OnCloseOtherTabsClick" />
+                                        <MenuItem Header="Close All Tabs" Click="OnCloseAllTabsClick" />
+                                    </ContextMenu>
+                                </StackPanel.ContextMenu>
                                 <TextBlock Text="{Binding TabTitle}" VerticalAlignment="Center"
                                            FontSize="11" Padding="6,2" />
                                 <Button Padding="3,1"
                                         Click="OnCloseSpecificTabClick"
                                         VerticalAlignment="Center"
-                                        Background="Transparent" Opacity="0.5">
+                                        Background="Transparent" Opacity="0.5"
+                                        ToolTip.Tip="Close tab">
                                     <Path Data="{StaticResource IconClose}" Width="10" Height="10" Stretch="Uniform"
                                           Fill="{DynamicResource SystemControlForegroundBaseHighBrush}" />
                                 </Button>
@@ -450,7 +531,7 @@
         </Border>
 
         <!-- Main Content Area with GridSplitters for resizable panels -->
-        <Grid ColumnDefinitions="200,Auto,*,Auto,250"
+        <Grid ColumnDefinitions="200,5,*,5,280"
               IsVisible="{Binding HasActiveTab}">
 
             <!-- Left Panel: Page Thumbnails -->
@@ -510,7 +591,9 @@
             </Border>
 
             <!-- Splitter: Left panel ↔ Center -->
-            <GridSplitter Grid.Column="1" Width="5"
+            <GridSplitter Grid.Column="1"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          ResizeBehavior="PreviousAndNext"
                           ResizeDirection="Columns"
                           Background="Transparent" />
 
@@ -520,45 +603,64 @@
                     <!-- PDF Page Display with annotation overlay -->
                     <ScrollViewer Grid.Row="0" Name="PageScrollViewer"
                                  HorizontalScrollBarVisibility="Auto"
-                                 VerticalScrollBarVisibility="Auto">
-                        <!-- Annotation canvas overlaid on the page image -->
-                        <Panel HorizontalAlignment="Center"
-                               VerticalAlignment="Center" Margin="20">
-                            <Border BoxShadow="0 2 10 0 #40000000"
-                                    IsVisible="{Binding ActiveTab.IsDocumentLoaded, FallbackValue=False}">
-                                <Border.ContextMenu>
-                                    <ContextMenu>
-                                        <MenuItem Header="Extract Text from Page" Click="OnExtractTextViewClick" />
-                                        <MenuItem Header="Export Page as Image..." Click="OnExportCurrentPageClick" />
-                                        <Separator />
-                                        <MenuItem Header="Zoom In" Click="OnContextZoomInClick" />
-                                        <MenuItem Header="Zoom Out" Click="OnContextZoomOutClick" />
-                                        <MenuItem Header="Zoom to Fit" Click="OnContextZoomFitClick" />
-                                        <Separator />
-                                        <MenuItem Header="Rotate Right 90°" Click="OnContextRotateRightClick" />
-                                        <MenuItem Header="Rotate Left 90°" Click="OnContextRotateLeftClick" />
-                                        <Separator />
-                                        <MenuItem Header="Add Text Annotation" Click="OnAnnotToolText" />
-                                        <MenuItem Header="Highlight" Click="OnAnnotToolHighlight" />
-                                        <MenuItem Header="Blur Region" Click="OnAnnotToolBlur" />
-                                        <Separator />
-                                        <MenuItem Header="Print" Click="OnPrintClick" />
-                                    </ContextMenu>
-                                </Border.ContextMenu>
-                                <Panel Name="PagePanel">
-                                    <Image Name="PageImage"
-                                           Source="{Binding ActiveTab.CurrentPageImage}"
-                                           Stretch="None" />
-                                    <!-- Annotation canvas overlaid on the PDF image -->
-                                    <Canvas Name="AnnotationCanvas"
-                                            PointerPressed="AnnotCanvas_PointerPressed"
-                                            PointerMoved="AnnotCanvas_PointerMoved"
-                                            PointerReleased="AnnotCanvas_PointerReleased"
-                                            Background="Transparent"
-                                            IsHitTestVisible="{Binding ActiveTab.IsAnnotationMode, FallbackValue=False}" />
-                                </Panel>
-                            </Border>
-                        </Panel>
+                                 VerticalScrollBarVisibility="Auto"
+                                 ScrollChanged="OnPageScrollViewerScrollChanged">
+                        <!-- Continuous-scroll page stack: all pages stacked vertically -->
+                        <ItemsControl Name="PageViewList"
+                                      ItemsSource="{Binding ActiveTab.PageViews}"
+                                      HorizontalAlignment="Center"
+                                      Margin="16,12,16,12">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Vertical" Spacing="12" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border HorizontalAlignment="Center"
+                                            BoxShadow="0 2 10 0 #40000000">
+                                        <Border.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Extract Text from Page" Click="OnExtractTextViewClick" />
+                                                <MenuItem Header="Export Page as Image..." Click="OnExportCurrentPageClick" />
+                                                <Separator />
+                                                <MenuItem Header="Zoom In"       Click="OnContextZoomInClick" />
+                                                <MenuItem Header="Zoom Out"      Click="OnContextZoomOutClick" />
+                                                <MenuItem Header="Zoom to Fit"   Click="OnContextZoomFitClick" />
+                                                <Separator />
+                                                <MenuItem Header="Rotate Right 90°" Click="OnContextRotateRightClick" />
+                                                <MenuItem Header="Rotate Left 90°"  Click="OnContextRotateLeftClick" />
+                                                <Separator />
+                                                <MenuItem Header="Add Text Annotation" Click="OnAnnotToolText" />
+                                                <MenuItem Header="Highlight"     Click="OnAnnotToolHighlight" />
+                                                <MenuItem Header="Blur Region"   Click="OnAnnotToolBlur" />
+                                                <Separator />
+                                                <MenuItem Header="Print" Click="OnPrintClick" />
+                                            </ContextMenu>
+                                        </Border.ContextMenu>
+                                        <Panel>
+                                            <!-- Rendered page bitmap -->
+                                            <Image Source="{Binding RenderedImage}" Stretch="None" />
+                                            <!-- Gray placeholder shown while page is rendering -->
+                                            <Border Width="850" Height="1100"
+                                                    Background="#F0F0F0"
+                                                    IsVisible="{Binding !IsRendered}">
+                                                <TextBlock Text="{Binding PageNumber, StringFormat='Page {0}'}"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Opacity="0.35" FontSize="22" />
+                                            </Border>
+                                            <!-- Per-page annotation canvas (Tag carries the 0-based page index) -->
+                                            <Canvas Tag="{Binding PageIndex}"
+                                                    Background="Transparent"
+                                                    PointerPressed="AnnotCanvas_PointerPressed"
+                                                    PointerMoved="AnnotCanvas_PointerMoved"
+                                                    PointerReleased="AnnotCanvas_PointerReleased" />
+                                        </Panel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </ScrollViewer>
 
                     <!-- Placeholder when no document -->
@@ -629,129 +731,190 @@
             </Border>
 
             <!-- Splitter: Center ↔ Right panel -->
-            <GridSplitter Grid.Column="3" Width="5"
+            <GridSplitter Grid.Column="3"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          ResizeBehavior="PreviousAndNext"
                           ResizeDirection="Columns"
                           Background="Transparent" />
 
             <!-- Right Panel: Properties & Tools -->
-            <Border Grid.Column="4" MinWidth="120"
+            <Border Grid.Column="4" MinWidth="180"
                     BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                     BorderThickness="1,0,0,0">
                 <ScrollViewer>
-                    <StackPanel Margin="10,8">
+                    <StackPanel Margin="8,6" Spacing="2">
 
                         <!-- Document Properties -->
-                        <TextBlock Classes="rp-header" Text="Properties" />
-                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" Margin="0,0,0,4">
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Title" FontSize="11" Opacity="0.6" Margin="0,0,6,3" VerticalAlignment="Center" />
-                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ActiveTab.Title}" FontSize="11" Padding="4,2" />
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Author" FontSize="11" Opacity="0.6" Margin="0,3,6,3" VerticalAlignment="Center" />
-                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ActiveTab.Author}" FontSize="11" Padding="4,2" Margin="0,3,0,0" />
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Subject" FontSize="11" Opacity="0.6" Margin="0,3,6,0" VerticalAlignment="Center" />
-                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ActiveTab.Subject}" FontSize="11" Padding="4,2" Margin="0,3,0,0" />
-                        </Grid>
-
-                        <!-- File Info (compact) -->
-                        <Border Background="{DynamicResource SystemControlHighlightListLowBrush}"
-                                CornerRadius="4" Padding="8,6" Margin="0,6,0,0">
-                            <StackPanel Spacing="2">
-                                <TextBlock Text="{Binding ActiveTab.FilePath, FallbackValue='No file'}"
-                                           TextWrapping="Wrap" FontSize="10" Opacity="0.5" />
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <TextBlock FontSize="11">
-                                        <Run Text="Pages: " FontWeight="SemiBold" />
-                                        <Run Text="{Binding ActiveTab.PageCount, FallbackValue='0'}" />
-                                    </TextBlock>
-                                    <TextBlock FontSize="11">
-                                        <Run Text="Modified: " FontWeight="SemiBold" />
-                                        <Run Text="{Binding ActiveTab.IsModified, FallbackValue='No'}" />
-                                    </TextBlock>
-                                </StackPanel>
+                        <Expander Classes="rp-section" Header="Properties" IsExpanded="True">
+                            <StackPanel Margin="0,4,0,6">
+                                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" Margin="0,0,0,4">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Title" FontSize="11" Opacity="0.6" Margin="0,0,6,3" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ActiveTab.Title}" FontSize="11" Padding="4,2" />
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Author" FontSize="11" Opacity="0.6" Margin="0,3,6,3" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ActiveTab.Author}" FontSize="11" Padding="4,2" Margin="0,3,0,0" />
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Subject" FontSize="11" Opacity="0.6" Margin="0,3,6,0" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ActiveTab.Subject}" FontSize="11" Padding="4,2" Margin="0,3,0,0" />
+                                </Grid>
+                                <Border Background="{DynamicResource SystemControlHighlightListLowBrush}"
+                                        CornerRadius="4" Padding="8,6" Margin="0,4,0,0">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding ActiveTab.FilePath, FallbackValue='No file'}"
+                                                   TextWrapping="Wrap" FontSize="10" Opacity="0.5" />
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <TextBlock FontSize="11">
+                                                <Run Text="Pages: " FontWeight="SemiBold" />
+                                                <Run Text="{Binding ActiveTab.PageCount, FallbackValue='0'}" />
+                                            </TextBlock>
+                                            <TextBlock FontSize="11">
+                                                <Run Text="Modified: " FontWeight="SemiBold" />
+                                                <Run Text="{Binding ActiveTab.IsModified, FallbackValue='No'}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                        </Border>
-
-                        <Separator Margin="0,10" />
+                        </Expander>
 
                         <!-- Quick Actions -->
-                        <TextBlock Classes="rp-header" Text="Quick Actions" />
-                        <StackPanel Spacing="3">
-                            <Button Classes="rp-btn" Content="Go to Page..." Click="OnGoToPageClick" />
-                            <Button Classes="rp-btn" Content="Extract Text" Click="OnExtractTextViewClick" />
-                            <Button Classes="rp-btn" Content="Export Images..." Click="OnExportImagesClick" />
-                            <Button Classes="rp-btn" Content="Split Document..." Click="OnSplitClick" />
-                            <Button Classes="rp-btn" Content="Crop Page..." Click="OnCropPageClick" />
-                            <Button Classes="rp-btn" Content="Batch Processing..." Click="OnBatchProcessingClick" />
-                        </StackPanel>
+                        <Expander Classes="rp-section" Header="Quick Actions" IsExpanded="True">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Go to Page..." Click="OnGoToPageClick" />
+                                <Button Classes="rp-btn" Content="Extract Text" Click="OnExtractTextViewClick" />
+                                <Button Classes="rp-btn" Content="Export Images..." Click="OnExportImagesClick" />
+                                <Button Classes="rp-btn" Content="Split Document..." Click="OnSplitClick" />
+                                <Button Classes="rp-btn" Content="Crop Page..." Click="OnCropPageClick" />
+                                <Button Classes="rp-btn" Content="Batch Processing..." Click="OnBatchProcessingClick" />
+                            </StackPanel>
+                        </Expander>
 
-                        <Separator Margin="0,10" />
-
-                        <!-- Forms -->
-                        <TextBlock Classes="rp-header" Text="Form Fields" />
-                        <StackPanel Spacing="3">
-                            <Button Classes="rp-btn" Content="Detect Fields" Click="OnDetectFormFieldsClick" />
-                            <Button Classes="rp-btn" Content="Fill Form..." Click="OnFillFormClick" />
-                            <Button Classes="rp-btn" Content="Flatten Form" Click="OnFlattenFormClick" />
-                            <Button Classes="rp-btn" Content="Export Form Data..." Click="OnExportFormDataClick" />
-                            <Button Classes="rp-btn" Content="Import Form Data..." Click="OnImportFormDataClick" />
-                        </StackPanel>
-
-                        <Separator Margin="0,10" />
+                        <!-- Form Fields -->
+                        <Expander Classes="rp-section" Header="Form Fields" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Detect Fields" Click="OnDetectFormFieldsClick" />
+                                <Button Classes="rp-btn" Content="Fill Form..." Click="OnFillFormClick" />
+                                <Button Classes="rp-btn" Content="Flatten Form" Click="OnFlattenFormClick" />
+                                <Button Classes="rp-btn" Content="Export Form Data..." Click="OnExportFormDataClick" />
+                                <Button Classes="rp-btn" Content="Import Form Data..." Click="OnImportFormDataClick" />
+                            </StackPanel>
+                        </Expander>
 
                         <!-- Signatures -->
-                        <TextBlock Classes="rp-header" Text="Signatures" />
-                        <StackPanel Spacing="3">
-                            <Button Classes="rp-btn" Content="Sign Document..." Click="OnSignDocumentClick" />
-                            <Button Classes="rp-btn" Content="Verify Signatures" Click="OnVerifySignaturesClick" />
-                            <Button Classes="rp-btn" Content="List Signatures" Click="OnListSignaturesClick" />
-                            <Button Classes="rp-btn" Content="Certificate Manager..." Click="OnCertificateManagerClick" />
-                        </StackPanel>
-
-                        <Separator Margin="0,10" />
+                        <Expander Classes="rp-section" Header="Signatures" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Sign Document..." Click="OnSignDocumentClick" />
+                                <Button Classes="rp-btn" Content="Verify Signatures" Click="OnVerifySignaturesClick" />
+                                <Button Classes="rp-btn" Content="List Signatures" Click="OnListSignaturesClick" />
+                                <Button Classes="rp-btn" Content="Certificate Manager..." Click="OnCertificateManagerClick" />
+                            </StackPanel>
+                        </Expander>
 
                         <!-- Annotations -->
-                        <TextBlock Classes="rp-header" Text="Annotations" />
-                        <StackPanel Spacing="3">
-                            <Button Classes="rp-btn" Content="Toggle Annotation Mode" Click="OnToggleAnnotationMode" />
-                            <Button Classes="rp-btn" Content="Burn into PDF" Click="OnBurnAnnotations" Foreground="OrangeRed" />
-                            <Button Classes="rp-btn" Content="Undo History..." Click="OnUndoHistoryClick" />
-                            <Button Classes="rp-btn" Content="Annotation List..." Click="OnAnnotationListClick" />
-                            <Button Classes="rp-btn" Content="Export Report..." Click="OnExportAnnotationReportClick" />
-                        </StackPanel>
-
-                        <Separator Margin="0,10" />
+                        <Expander Classes="rp-section" Header="Annotations" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Toggle Annotation Mode" Click="OnToggleAnnotationMode" />
+                                <Button Classes="rp-btn" Content="Burn into PDF" Click="OnBurnAnnotations" Foreground="OrangeRed" />
+                                <Button Classes="rp-btn" Content="Undo History..." Click="OnUndoHistoryClick" />
+                                <Button Classes="rp-btn" Content="Annotation List..." Click="OnAnnotationListClick" />
+                                <Button Classes="rp-btn" Content="Export Report..." Click="OnExportAnnotationReportClick" />
+                            </StackPanel>
+                        </Expander>
 
                         <!-- Searchable PDF -->
-                        <TextBlock Classes="rp-header" Text="Searchable PDF" />
-                        <StackPanel Spacing="3">
-                            <Button Classes="rp-btn" Content="Make Searchable (OCR)..." Click="OnMakeSearchablePdfClick" />
-                        </StackPanel>
-
-                        <Separator Margin="0,10" />
+                        <Expander Classes="rp-section" Header="Searchable PDF" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Make Searchable (OCR)..." Click="OnMakeSearchablePdfClick" />
+                            </StackPanel>
+                        </Expander>
 
                         <!-- Redaction -->
-                        <TextBlock Classes="rp-header" Text="Redaction" />
-                        <StackPanel Spacing="3">
-                            <Button Classes="rp-btn" Content="Redact Text..." Click="OnRedactTextClick" />
-                            <Button Classes="rp-btn" Content="Redact Current Page" Click="OnRedactPageClick" Foreground="OrangeRed" />
-                            <Button Classes="rp-btn" Content="Find Targets..." Click="OnFindRedactionTargetsClick" />
-                        </StackPanel>
-
-                        <Separator Margin="0,10" />
+                        <Expander Classes="rp-section" Header="Redaction" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Redact Text..." Click="OnRedactTextClick" />
+                                <Button Classes="rp-btn" Content="Redact Current Page" Click="OnRedactPageClick" Foreground="OrangeRed" />
+                                <Button Classes="rp-btn" Content="Find Targets..." Click="OnFindRedactionTargetsClick" />
+                            </StackPanel>
+                        </Expander>
 
                         <!-- Document Comparison -->
-                        <TextBlock Classes="rp-header" Text="Compare" />
-                        <StackPanel Spacing="3">
-                            <Button Classes="rp-btn" Content="Compare Documents..." Click="OnCompareDocumentsClick" />
-                        </StackPanel>
-
-                        <Separator Margin="0,10" />
+                        <Expander Classes="rp-section" Header="Compare" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Compare Documents..." Click="OnCompareDocumentsClick" />
+                            </StackPanel>
+                        </Expander>
 
                         <!-- Security -->
-                        <TextBlock Classes="rp-header" Text="Security" />
-                        <StackPanel Spacing="3">
-                            <Button Classes="rp-btn" Content="Encrypt / Permissions..." Click="OnPermissionManagerClick" />
-                            <Button Classes="rp-btn" Content="Decrypt Document..." Click="OnDecryptDocumentClick" />
-                        </StackPanel>
+                        <Expander Classes="rp-section" Header="Security" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Encrypt / Permissions..." Click="OnPermissionManagerClick" />
+                                <Button Classes="rp-btn" Content="Decrypt Document..." Click="OnDecryptDocumentClick" />
+                                <Button Classes="rp-btn" Content="Metadata Scrubber..." Click="OnMetadataScrubberClick" />
+                                <Button Classes="rp-btn" Content="Sanitize Document..." Click="OnSanitizeDocumentClick" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Document Processing -->
+                        <Expander Classes="rp-section" Header="Document Processing" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Auto-Crop..." Click="OnAutoCropClick" />
+                                <Button Classes="rp-btn" Content="Deskew Pages..." Click="OnDeskewClick" />
+                                <Button Classes="rp-btn" Content="Background Removal..." Click="OnBackgroundRemovalClick" />
+                                <Button Classes="rp-btn" Content="Header/Footer..." Click="OnHeaderFooterClick" />
+                                <Button Classes="rp-btn" Content="Table of Contents..." Click="OnTableOfContentsClick" />
+                                <Button Classes="rp-btn" Content="Booklet Creation..." Click="OnBookletClick" />
+                                <Button Classes="rp-btn" Content="Print to PDF..." Click="OnPrintToPdfClick" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Text & Content -->
+                        <Expander Classes="rp-section" Header="Text &amp; Content" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Find &amp; Replace..." Click="OnFindReplaceClick" />
+                                <Button Classes="rp-btn" Content="Font Analysis..." Click="OnFontAnalysisClick" />
+                                <Button Classes="rp-btn" Content="Table Editor..." Click="OnTableEditorClick" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Image Tools -->
+                        <Expander Classes="rp-section" Header="Image Tools" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Extract All Images..." Click="OnExtractImagesClick" />
+                                <Button Classes="rp-btn" Content="Compress Images..." Click="OnCompressImagesClick" />
+                                <Button Classes="rp-btn" Content="Insert Barcode..." Click="OnInsertBarcodeClick" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Accessibility -->
+                        <Expander Classes="rp-section" Header="Accessibility" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Check Accessibility..." Click="OnAccessibilityCheckClick" />
+                                <Button Classes="rp-btn" Content="Auto-Tag PDF..." Click="OnAutoTagClick" />
+                                <Button Classes="rp-btn" Content="Alt Text Editor..." Click="OnAltTextEditorClick" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Archiving -->
+                        <Expander Classes="rp-section" Header="Archiving" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Convert to PDF/A..." Click="OnConvertPdfAClick" />
+                                <Button Classes="rp-btn" Content="Inspect PDF/A..." Click="OnInspectPdfAClick" />
+                                <Button Classes="rp-btn" Content="Convert to PDF/X..." Click="OnConvertPdfXClick" />
+                                <Button Classes="rp-btn" Content="Inspect PDF/X..." Click="OnInspectPdfXClick" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Productivity -->
+                        <Expander Classes="rp-section" Header="Productivity" IsExpanded="False">
+                            <StackPanel Spacing="3" Margin="0,4,0,4">
+                                <Button Classes="rp-btn" Content="Quick Actions..." Click="OnQuickActionsClick" />
+                                <Button Classes="rp-btn" Content="Templates..." Click="OnTemplatesClick" />
+                                <Button Classes="rp-btn" Content="Watch Folder..." Click="OnWatchFolderClick" />
+                                <Button Classes="rp-btn" Content="Electronic Signature..." Click="OnElectronicSignatureClick" />
+                                <Button Classes="rp-btn" Content="Calculation Fields..." Click="OnCalculationFieldsClick" />
+                                <Button Classes="rp-btn" Content="Conditional Logic..." Click="OnConditionalLogicClick" />
+                                <Button Classes="rp-btn" Content="Form Validation..." Click="OnFormValidationClick" />
+                            </StackPanel>
+                        </Expander>
+
                     </StackPanel>
                 </ScrollViewer>
             </Border>

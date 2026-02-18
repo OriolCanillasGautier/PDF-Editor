@@ -317,7 +317,7 @@ public class MeasurementService
     /// </summary>
     public static string FormatMeasurement(double value, string unit)
     {
-        return $"{value:F2} {unit}";
+        return $"{value.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} {unit}";
     }
 
     /// <summary>
@@ -325,7 +325,7 @@ public class MeasurementService
     /// </summary>
     public static string FormatAreaMeasurement(double value, string unit)
     {
-        return $"{value:F2} {unit}²";
+        return $"{value.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} {unit}²";
     }
 
     #endregion

@@ -3,6 +3,7 @@ name: Build & Test
 on:
   push:
     branches: [ main, master, develop ]
+    tags:    [ 'v*.*.*' ]
   pull_request:
     branches: [ main, master ]
 
@@ -34,14 +35,26 @@ jobs:
     - name: Build
       run: dotnet build --configuration Release --no-restore
 
-    - name: Test
-      run: dotnet test --configuration Release --no-build --verbosity normal
+    - name: Test with coverage
+      run: >
+        dotnet test --configuration Release --no-build --verbosity normal
+        /p:CollectCoverage=true
+        /p:CoverletOutputFormat=cobertura
+        /p:CoverletOutput=./coverage/
+
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      if: matrix.os == 'ubuntu-latest'
+      with:
+        name: coverage-report
+        path: '**/coverage/*.xml'
+        retention-days: 14
 
   publish:
     name: Publish Artifacts
     needs: build
     runs-on: ${{ matrix.os }}
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
         include:
@@ -78,3 +91,69 @@ jobs:
         name: ${{ matrix.artifact-name }}
         path: ./publish/
         retention-days: 30
+
+    - name: Upload portable ZIP
+      uses: actions/upload-artifact@v4
+      if: false  # GitHub already provides source archives on every release; no separate zip needed
+      with:
+        name: ${{ matrix.artifact-name }}-portable
+        path: ./PDFEditor-${{ matrix.rid }}-portable.zip
+        retention-days: 30
+
+    - name: Build MSI installer (Windows only)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        # Extract version from tag (v1.2.3 → 1.2.3) or fall back to Directory.Build.props
+        $ref = '${{ github.ref_name }}'
+        if ($ref -match '^v?(\d+\.\d+\.\d+)') {
+          $appVersion = $matches[1]
+        } else {
+          $appVersion = ([xml](Get-Content 'Directory.Build.props')).Project.PropertyGroup.Version
+        }
+        Write-Host "Building MSI version $appVersion"
+        choco install wixtoolset -y --no-progress
+        $wixBin = "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin"
+        $env:Path += ";$wixBin"
+        New-Item -ItemType Directory -Force -Path installer/obj | Out-Null
+        & "$wixBin\heat.exe" dir ./publish/ -cg PublishedFiles -dr INSTALLFOLDER -gg -sreg -srd -sfrag -out installer/obj/harvested.wxs
+        & "$wixBin\candle.exe" installer/PDFEditor.Installer.v3.wxs -dPublishDir=./publish/ -dAppVersion=$appVersion -ext WixUIExtension -out installer/obj/base.wixobj
+        & "$wixBin\candle.exe" installer/obj/harvested.wxs -out installer/obj/harvested.wixobj
+        & "$wixBin\light.exe" -ext WixUIExtension -out installer/PDFEditor-Setup-win-x64.msi -b ./publish/ -b ./installer/ installer/obj/base.wixobj installer/obj/harvested.wixobj
+
+    - name: Upload MSI artifact
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: PDFEditor-Setup-win-x64
+        path: installer/PDFEditor-Setup-win-x64.msi
+        retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download MSI
+      uses: actions/download-artifact@v4
+      with:
+        name: PDFEditor-Setup-win-x64
+        path: ./release-assets
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: "PDF Editor ${{ github.ref_name }}"
+        draft: false
+        prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+        generate_release_notes: true
+        files: |
+          ./release-assets/PDFEditor-Setup-win-x64.msi
+

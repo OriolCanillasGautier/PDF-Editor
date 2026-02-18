@@ -51,6 +51,99 @@ public class SearchResultItem
 }
 
 /// <summary>
+/// Represents a single page in the continuous-scroll viewer.
+/// Starts as a placeholder (IsRendered=false) and receives a bitmap lazily.
+/// </summary>
+public class PageViewItem : ReactiveObject
+{
+    private Bitmap? _renderedImage;
+    private bool    _isRendered;
+
+    public int PageIndex  { get; init; }
+    public int PageNumber => PageIndex + 1;
+
+    public bool IsRendered
+    {
+        get => _isRendered;
+        set => this.RaiseAndSetIfChanged(ref _isRendered, value);
+    }
+
+    /// <summary>Last-rendered pixel width (used for scroll-offset calculation).</summary>
+    public int RenderedWidth  { get; set; } = 850;
+    /// <summary>Last-rendered pixel height (used for scroll-offset calculation).</summary>
+    public int RenderedHeight { get; set; } = 1100;
+
+    public Bitmap? RenderedImage
+    {
+        get => _renderedImage;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _renderedImage, value);
+            IsRendered = value != null;
+        }
+    }
+}
+
+/// <summary>
+/// Simple thread-safe LRU cache keyed by (PageIndex, MaxWidth, MaxHeight).
+/// </summary>
+internal sealed class LruCache<TKey, TValue> where TKey : notnull
+{
+    private readonly int _capacity;
+    private readonly Dictionary<TKey, LinkedListNode<(TKey Key, TValue Value)>> _map;
+    private readonly LinkedList<(TKey Key, TValue Value)> _list;
+    private readonly object _lock = new();
+
+    public LruCache(int capacity)
+    {
+        _capacity = capacity;
+        _map  = new(_capacity);
+        _list = new();
+    }
+
+    public bool TryGet(TKey key, out TValue value)
+    {
+        lock (_lock)
+        {
+            if (_map.TryGetValue(key, out var node))
+            {
+                _list.Remove(node);
+                _list.AddFirst(node);
+                value = node.Value.Value;
+                return true;
+            }
+            value = default!;
+            return false;
+        }
+    }
+
+    public void Put(TKey key, TValue value)
+    {
+        lock (_lock)
+        {
+            if (_map.TryGetValue(key, out var existing))
+            {
+                _list.Remove(existing);
+                _map.Remove(key);
+            }
+            var node = _list.AddFirst((key, value));
+            _map[key] = node;
+            if (_list.Count > _capacity)
+            {
+                var last = _list.Last!;
+                _list.RemoveLast();
+                _map.Remove(last.Value.Key);
+            }
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_lock) { _map.Clear(); _list.Clear(); }
+    }
+}
+
+/// <summary>
 /// ViewModel for a single open PDF document tab.
 /// Thread-safe: all PDF mutations go through a SemaphoreSlim lock.
 /// All reactive canExecute observables are marshaled to the UI thread.
@@ -84,6 +177,11 @@ public class DocumentTabViewModel : ReactiveObject
 
     // Lazy thumbnail loading cancellation
     private CancellationTokenSource _thumbnailCts = new();
+    // Lazy page-view loading cancellation (continuous scroll)
+    private CancellationTokenSource _pageViewCts  = new();
+
+    // Render cache: keyed by (pageIndex, maxW, maxH) → avoids re-rendering same zoom/page
+    private readonly LruCache<(int, int, int), Bitmap> _renderCache = new(30);
 
     // PDF state
     private byte[]? _pdfBytes;
@@ -117,6 +215,8 @@ public class DocumentTabViewModel : ReactiveObject
     public ObservableCollection<ThumbnailItem> Thumbnails { get; } = new();
     public ObservableCollection<SearchResultItem> SearchResults { get; } = new();
     public ObservableCollection<PdfAnnotation> Annotations { get; } = new();
+    /// <summary>One item per page for the continuous-scroll viewer.</summary>
+    public ObservableCollection<PageViewItem> PageViews { get; } = new();
 
     // Public getters for services / state
     public byte[]? PdfBytes => _pdfBytes;
@@ -259,7 +359,9 @@ public class DocumentTabViewModel : ReactiveObject
             if (Math.Abs(value - _zoomLevel) > 0.001)
             {
                 this.RaiseAndSetIfChanged(ref _zoomLevel, value);
-                RenderCurrentPage();
+                _renderCache.Clear();   // invalidate cache on zoom change
+                InvalidatePageViews();  // clear all continuous-scroll renders
+                RenderCurrentPage();    // immediately re-render the current page
                 this.RaisePropertyChanged(nameof(ZoomPercent));
             }
         }
@@ -696,7 +798,8 @@ public class DocumentTabViewModel : ReactiveObject
         this.RaisePropertyChanged(nameof(SelectedThumbnailIndex));
 
         LoadMetadata();
-        RenderCurrentPage();
+        InitPageViews();      // populate continuous-scroll placeholders
+        RenderCurrentPage();  // render page 0 immediately (updates PageViews[0] too)
         LoadThumbnails();
         UpdatePageInfo();
         RaiseUndoRedoChanged();
@@ -748,6 +851,9 @@ public class DocumentTabViewModel : ReactiveObject
     {
         RecordAndApply(description, newBytes);
         PageCount = _renderService.GetPageCount(_pdfBytes);
+        _renderCache.Clear();
+        InvalidatePageViews();
+        InitPageViews();
         RenderCurrentPage();
         LoadThumbnails();
         UpdatePageInfo();
@@ -1170,14 +1276,139 @@ public class DocumentTabViewModel : ReactiveObject
         {
             int maxW = (int)(900 * _zoomLevel);
             int maxH = (int)(1200 * _zoomLevel);
-            var (pixels, width, height) = _renderService.RenderPage(_pdfBytes, _currentPageIndex, maxW, maxH);
-            CurrentPageImage = BitmapHelper.CreateBitmapFromBgra(pixels, width, height);
+            var cacheKey = (_currentPageIndex, maxW, maxH);
+            if (!_renderCache.TryGet(cacheKey, out var bitmap))
+            {
+                var (pixels, width, height) = _renderService.RenderPage(_pdfBytes, _currentPageIndex, maxW, maxH);
+                bitmap = BitmapHelper.CreateBitmapFromBgra(pixels, width, height);
+                _renderCache.Put(cacheKey, bitmap);
+                // Also feed the continuous-scroll PageView item
+                if (_currentPageIndex < PageViews.Count)
+                {
+                    var item = PageViews[_currentPageIndex];
+                    item.RenderedWidth  = width;
+                    item.RenderedHeight = height;
+                    item.RenderedImage  = bitmap;
+                }
+            }
+            CurrentPageImage = bitmap;
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Render failed for page {Page}", _currentPageIndex + 1);
             StatusText = $"Render error: {ex.Message}";
         }
+    }
+
+    // ── Continuous-scroll page-view helpers ────────────────────────────────────
+
+    /// <summary>Populates <see cref="PageViews"/> with empty placeholder items (one per page).</summary>
+    public void InitPageViews()
+    {
+        // Cancel any in-flight page-view renders
+        _pageViewCts.Cancel();
+        _pageViewCts.Dispose();
+        _pageViewCts = new CancellationTokenSource();
+
+        PageViews.Clear();
+        for (int i = 0; i < _pageCount; i++)
+            PageViews.Add(new PageViewItem { PageIndex = i });
+    }
+
+    /// <summary>
+    /// Called by the scroll handler when the user scrolls the continuous view.
+    /// Renders all pages in <paramref name="visibleIndices"/> that haven't been rendered yet at the current zoom.
+    /// </summary>
+    public void NotifyVisiblePageViews(IReadOnlyList<int> visibleIndices)
+    {
+        var pdf   = _pdfBytes;
+        var zoom  = _zoomLevel;
+        var ct    = _pageViewCts.Token;
+        if (pdf == null) return;
+
+        foreach (int idx in visibleIndices)
+        {
+            if (idx < 0 || idx >= PageViews.Count) continue;
+            var item = PageViews[idx];
+            if (item.IsRendered) continue;   // already rendered at this zoom
+            RenderPageViewAsync(item, pdf, zoom, ct);
+        }
+    }
+
+    /// <summary>Clears renders on all PageView items so they re-render at the new zoom.</summary>
+    public void InvalidatePageViews()
+    {
+        // Cancel any in-flight renders so they don't restore old bitmaps
+        _pageViewCts.Cancel();
+        _pageViewCts.Dispose();
+        _pageViewCts = new CancellationTokenSource();
+        foreach (var item in PageViews)
+            item.RenderedImage = null;  // clears IsRendered via setter
+    }
+
+    /// <summary>Clears the render for a single page view (after a mutation on that page).</summary>
+    public void InvalidatePageViewAt(int pageIndex)
+    {
+        if (pageIndex >= 0 && pageIndex < PageViews.Count)
+            PageViews[pageIndex].RenderedImage = null;
+    }
+
+    /// <summary>
+    /// Returns the approximate Y-scroll offset (in pixels) to scroll to <paramref name="pageIndex"/>.
+    /// Uses each item's <see cref="PageViewItem.RenderedHeight"/> when known, a default otherwise.
+    /// </summary>
+    public double GetPageScrollOffset(int pageIndex)
+    {
+        const double DefaultH  = 1100.0;
+        const double Spacing   = 12.0;
+        const double TopMargin = 12.0;
+        double offset = TopMargin;
+        for (int i = 0; i < Math.Min(pageIndex, PageViews.Count); i++)
+        {
+            double h = PageViews[i].IsRendered ? PageViews[i].RenderedHeight : DefaultH;
+            offset += h + Spacing;
+        }
+        return offset;
+    }
+
+    /// <summary>
+    /// Updates <see cref="CurrentPageIndex"/> silently (no RenderCurrentPage call).
+    /// Used by the scroll handler so thumbnail sidebar stays in sync without a re-render loop.
+    /// </summary>
+    public void SetCurrentPageSilent(int pageIndex)
+    {
+        if (pageIndex < 0 || pageIndex >= _pageCount || pageIndex == _currentPageIndex) return;
+        _currentPageIndex      = pageIndex;
+        _selectedThumbnailIndex = pageIndex;
+        this.RaisePropertyChanged(nameof(CurrentPageIndex));
+        this.RaisePropertyChanged(nameof(SelectedThumbnailIndex));
+        UpdatePageInfo();
+    }
+
+    private void RenderPageViewAsync(PageViewItem item, byte[] pdf, double zoom, CancellationToken ct)
+    {
+        Task.Run(() =>
+        {
+            if (ct.IsCancellationRequested) return;
+            try
+            {
+                int maxW = (int)(900 * zoom);
+                int maxH = (int)(1200 * zoom);
+                var cacheKey = (item.PageIndex, maxW, maxH);
+                if (!_renderCache.TryGet(cacheKey, out var bmp))
+                {
+                    var (pixels, w, h) = _renderService.RenderPage(pdf, item.PageIndex, maxW, maxH);
+                    bmp = BitmapHelper.CreateBitmapFromBgra(pixels, w, h);
+                    _renderCache.Put(cacheKey, bmp);
+                    item.RenderedWidth  = w;
+                    item.RenderedHeight = h;
+                }
+                if (ct.IsCancellationRequested) return;
+                Dispatcher.UIThread.Post(() => item.RenderedImage = bmp, DispatcherPriority.Background);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { Log.Warn(ex, "PageView render failed p{Page}", item.PageIndex + 1); }
+        }, ct);
     }
 
     /// <summary>

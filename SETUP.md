@@ -38,7 +38,7 @@ git clone <repository-url>
 cd PDF-Editor
 
 # Or just navigate to the existing folder
-cd c:\Users\ocanillas\OneDrive - SOME, S.A\Documents\GitHub\PDF-Editor
+cd C:\Users\YOUR_USERNAME\Documents\GitHub\PDF-Editor
 ```
 
 ### 2. Restore NuGet Dependencies

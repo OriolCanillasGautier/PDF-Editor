@@ -5,7 +5,10 @@ namespace PDFEditor.Core;
 /// </summary>
 public static class AppConfig
 {
-    public const string ApplicationVersion = "1.0.0-alpha";
+    /// <summary>
+    /// Application version — keep in sync with Directory.Build.props &lt;Version&gt; tag
+    /// </summary>
+    public const string ApplicationVersion = "0.0.2";
     public const string ApplicationName = "PDF Editor";
     public const int DefaultDpi = 300;
     public const string SupportedImageFormats = "PNG,JPEG,TIFF,BMP";

@@ -195,8 +195,8 @@ public class CalculationFieldService
     private string FormatResult(double value, CalculationRule rule)
     {
         if (!string.IsNullOrEmpty(rule.FormatString))
-            return value.ToString(rule.FormatString);
-        return value.ToString($"F{rule.DecimalPlaces}");
+            return value.ToString(rule.FormatString, System.Globalization.CultureInfo.InvariantCulture);
+        return value.ToString($"F{rule.DecimalPlaces}", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private string EvaluateCustom(string? expression, List<string> values)
@@ -216,7 +216,7 @@ public class CalculationFieldService
         {
             // Very basic: handle "a + b", "a - b", "a * b", "a / b"
             if (double.TryParse(result, out double directValue))
-                return directValue.ToString("F2");
+                return directValue.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
         }
         catch { }
 

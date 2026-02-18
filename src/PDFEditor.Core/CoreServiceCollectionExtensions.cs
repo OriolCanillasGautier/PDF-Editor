@@ -156,6 +156,12 @@ public static class CoreServiceCollectionExtensions
             // PDF/X Service
             services.AddSingleton<PdfXService>();
 
+            // --- Phase 12: Optimization ---
+            services.AddSingleton<PdfOptimizer>();
+
+            // Plugin Manager (scans ./Plugins directory at runtime)
+            services.AddSingleton<PluginManager>();
+
             Logger.Info("PDF Editor Core services registered successfully");
             return services;
         }

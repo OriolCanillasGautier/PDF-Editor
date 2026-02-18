@@ -6,7 +6,7 @@ Welcome to the PDF Editor project! These guidelines will help ensure smooth coll
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR-USERNAME/PDF-Editor.git`
-3. Add upstream: `git remote add upstream https://github.com/ocanillas/PDF-Editor.git`
+3. Add upstream: `git remote add upstream https://github.com/OriolCanillasGautier/PDF-Editor.git`
 4. Create feature branch: `git checkout -b feature/your-feature-name`
 
 ## Development Workflow

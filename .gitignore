@@ -218,7 +218,6 @@ dist/
 *.ncrunchproject
 
 # Installer build artifacts (keep source files, ignore outputs)´
-installer/
 installer/obj/
 installer/*.msi
 installer/msi-install.log

@@ -1,0 +1,24 @@
+<Project>
+  <!--
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  SINGLE SOURCE OF TRUTH FOR APP VERSION                      ║
+    ║  Change the Version here — it propagates to:                 ║
+    ║    • All assemblies (Assembly/FileVersion)                    ║
+    ║    • NuGet packages                                           ║
+    ║    • The MSI installer (via build-installer.ps1)             ║
+    ╚══════════════════════════════════════════════════════════════╝
+  -->
+  <PropertyGroup>
+    <Version>0.0.2</Version>
+    <AssemblyVersion>$(Version)</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+
+    <!-- Company / product metadata embedded in every assembly -->
+    <Company>PDF-Editor</Company>
+    <Product>PDF Editor</Product>
+    <Copyright>Copyright © 2026 PDF-Editor</Copyright>
+    <Authors>Oriol Canillas</Authors>
+    <RepositoryUrl>https://github.com/OriolCanillasGautier/PDF-Editor</RepositoryUrl>
+  </PropertyGroup>
+</Project>

@@ -432,7 +432,7 @@ dotnet run --project src/PDFEditor.UI/PDFEditor.UI.csproj
 
 ```powershell
 # Clone repository
-git clone https://github.com/ocanillas/PDF-Editor.git
+git clone https://github.com/OriolCanillasGautier/PDF-Editor.git
 cd PDF-Editor
 
 # Restore dependencies

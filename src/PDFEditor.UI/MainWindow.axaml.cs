@@ -12,9 +12,12 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using NLog;
+using PDFEditor.Core.Abstractions;
 using PDFEditor.Core.Services;
 using PDFEditor.UI.ViewModels;
 
@@ -57,6 +60,12 @@ public partial class MainWindow : Window
     private string _currentFontColor = "#000000";
     private bool _currentBold;
     private bool _currentItalic;
+
+    // Continuous-scroll: active annotation canvas (set when user presses on a per-page canvas)
+    private Canvas? _activeAnnotCanvas;
+    // Guards to prevent thumbnail↔scroll feedback loops
+    private bool _isProgrammaticScroll;
+    private bool _suppressThumbnailNav;
 
     public MainWindow()
     {
@@ -257,7 +266,7 @@ public partial class MainWindow : Window
                     {
                         _isEditingInline = false;
                         _editingAnnotation = null;
-                        var annotCanvas = this.FindControl<Canvas>("AnnotationCanvas");
+                        var annotCanvas = GetAnnotationElements().canvas;
                         if (annotCanvas != null && _inlineTextBox != null)
                         {
                             annotCanvas.Children.Remove(_inlineTextBox);
@@ -361,6 +370,22 @@ public partial class MainWindow : Window
             Vm?.CloseTab(tab);
     }
 
+    private void OnCloseOtherTabsClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem mi && mi.DataContext is DocumentTabViewModel tab && Vm != null)
+        {
+            var others = Vm.Tabs.Where(t => t != tab).ToList();
+            foreach (var t in others) Vm.CloseTab(t);
+        }
+    }
+
+    private void OnCloseAllTabsClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm == null) return;
+        var all = Vm.Tabs.ToList();
+        foreach (var t in all) Vm.CloseTab(t);
+    }
+
     private void OnNewTabClick(object? sender, RoutedEventArgs e) => Vm?.NewTabCommand.Execute().Subscribe();
 
     private void OnExitClick(object? sender, RoutedEventArgs e) => Close();
@@ -422,17 +447,97 @@ public partial class MainWindow : Window
 
     #region Navigation
 
-    private void OnFirstPageClick(object? sender, RoutedEventArgs e) =>
-        ExecuteTabCommand(() => Tab?.FirstPageCommand.Execute().Subscribe());
+    /// <summary>Scrolls the continuous-scroll viewer to the given 0-based page index.</summary>
+    private void ScrollToPage(int pageIndex)
+    {
+        if (Tab == null || pageIndex < 0 || pageIndex >= Tab.PageCount) return;
+        var sv = this.FindControl<ScrollViewer>("PageScrollViewer");
+        if (sv == null) return;
+        _isProgrammaticScroll = true;
+        try
+        {
+            sv.Offset = new Vector(sv.Offset.X, Tab.GetPageScrollOffset(pageIndex));
+            Tab.SetCurrentPageSilent(pageIndex);
+        }
+        finally { _isProgrammaticScroll = false; }
+        // Kick off render for pages now visible after the programmatic scroll
+        Dispatcher.UIThread.Post(() =>
+        {
+            var sv2 = this.FindControl<ScrollViewer>("PageScrollViewer");
+            if (sv2 != null) NotifyVisiblePagesFromScroller(sv2);
+        }, Avalonia.Threading.DispatcherPriority.Background);
+    }
 
-    private void OnLastPageClick(object? sender, RoutedEventArgs e) =>
-        ExecuteTabCommand(() => Tab?.LastPageCommand.Execute().Subscribe());
+    private void OnFirstPageClick(object? sender, RoutedEventArgs e) => ScrollToPage(0);
+    private void OnLastPageClick(object? sender, RoutedEventArgs e)  => ScrollToPage((Tab?.PageCount ?? 1) - 1);
+    private void OnPrevPageClick(object? sender, RoutedEventArgs e)  => ScrollToPage((Tab?.CurrentPageIndex ?? 1) - 1);
+    private void OnNextPageClick(object? sender, RoutedEventArgs e)  => ScrollToPage((Tab?.CurrentPageIndex ?? 0) + 1);
 
-    private void OnPrevPageClick(object? sender, RoutedEventArgs e) =>
-        ExecuteTabCommand(() => Tab?.PreviousPageCommand.Execute().Subscribe());
+    #endregion
 
-    private void OnNextPageClick(object? sender, RoutedEventArgs e) =>
-        ExecuteTabCommand(() => Tab?.NextPageCommand.Execute().Subscribe());
+    #region Continuous Scroll
+
+    /// <summary>
+    /// Fired whenever the PageScrollViewer scrolls (user scroll or programmatic).
+    /// Updates <see cref="DocumentTabViewModel.CurrentPageIndex"/> and triggers lazy renders.
+    /// </summary>
+    private void OnPageScrollViewerScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (_isProgrammaticScroll) return;
+        if (Tab == null || sender is not ScrollViewer sv) return;
+
+        // Determine the center-most visible page
+        int center = GetCenterVisiblePage(sv);
+        if (center >= 0 && center != Tab.CurrentPageIndex)
+        {
+            _suppressThumbnailNav = true;
+            Tab.SetCurrentPageSilent(center);
+            _suppressThumbnailNav = false;
+        }
+
+        NotifyVisiblePagesFromScroller(sv);
+    }
+
+    /// <summary>
+    /// Returns the page index that is most centered (or first fully visible) in the scroll viewport.
+    /// </summary>
+    private int GetCenterVisiblePage(ScrollViewer sv)
+    {
+        if (Tab == null || Tab.PageViews.Count == 0) return -1;
+        double top    = sv.Offset.Y;
+        double center = top + sv.Viewport.Height / 2.0;
+        double y = 12.0; // top margin (matches Margin="16,12")
+        for (int i = 0; i < Tab.PageViews.Count; i++)
+        {
+            double h = Tab.PageViews[i].IsRendered ? Tab.PageViews[i].RenderedHeight : 1100.0;
+            double bottom = y + h;
+            if (center >= y && center <= bottom) return i;
+            if (y > center) return Math.Max(0, i - 1);
+            y = bottom + 12.0; // spacing
+        }
+        return Tab.PageViews.Count - 1;
+    }
+
+    /// <summary>
+    /// Determines the set of currently visible pages and asks the ViewModel to render them.
+    /// </summary>
+    private void NotifyVisiblePagesFromScroller(ScrollViewer sv)
+    {
+        if (Tab == null || Tab.PageViews.Count == 0) return;
+        double top    = sv.Offset.Y;
+        double bottom = top + sv.Viewport.Height;
+        var visible = new List<int>();
+        double y = 12.0;
+        for (int i = 0; i < Tab.PageViews.Count; i++)
+        {
+            double h       = Tab.PageViews[i].IsRendered ? Tab.PageViews[i].RenderedHeight : 1100.0;
+            double itemBot = y + h;
+            if (itemBot > top && y < bottom) visible.Add(i);
+            if (y > bottom) break;
+            y = itemBot + 12.0;
+        }
+        Tab.NotifyVisiblePageViews(visible);
+    }
 
     #endregion
 
@@ -441,6 +546,19 @@ public partial class MainWindow : Window
     private void OnContextZoomInClick(object? sender, RoutedEventArgs e) => Tab?.ZoomInCommand.Execute().Subscribe();
     private void OnContextZoomOutClick(object? sender, RoutedEventArgs e) => Tab?.ZoomOutCommand.Execute().Subscribe();
     private void OnContextZoomFitClick(object? sender, RoutedEventArgs e) => Tab?.ZoomFitCommand.Execute().Subscribe();
+
+    private void OnZoomSliderChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (Tab != null && Math.Abs(Tab.ZoomLevel - e.NewValue) > 0.001)
+        {
+            Tab.ZoomLevel = e.NewValue;
+            // Re-render visible pages at new zoom
+            var sv = this.FindControl<ScrollViewer>("PageScrollViewer");
+            if (sv != null) Dispatcher.UIThread.Post(
+                () => NotifyVisiblePagesFromScroller(sv),
+                Avalonia.Threading.DispatcherPriority.Background);
+        }
+    }
 
     #endregion
 
@@ -1206,6 +1324,7 @@ public partial class MainWindow : Window
 
     private void OnThumbnailSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
+        if (_suppressThumbnailNav) return;
         if (Tab == null) return;
         var lb = sender as ListBox;
         if (lb == null) return;
@@ -1217,6 +1336,10 @@ public partial class MainWindow : Window
             if (idx >= 0) indices.Add(idx);
         }
         Tab.UpdateSelectedPages(indices);
+
+        // Scroll the continuous viewer to the primary selected page
+        if (lb.SelectedIndex >= 0)
+            ScrollToPage(lb.SelectedIndex);
     }
 
     private void ThumbListBox_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -1443,12 +1566,34 @@ public partial class MainWindow : Window
 
     #region Annotation Canvas Drawing
 
+    /// <summary>
+    /// Returns the active annotation canvas + its sibling Image in page-view DataTemplate items.
+    /// Falls back to the legacy named controls when the named canvas still exists.
+    /// </summary>
+    private (Canvas? canvas, Image? pageImage) GetAnnotationElements()
+    {
+        var canvas = _activeAnnotCanvas;
+        Image? img = null;
+        if (canvas?.Parent is Panel panel)
+            img = panel.Children.OfType<Image>().FirstOrDefault();
+        // Fall back to named controls (no-op in the new AXAML which has no named canvas)
+        canvas ??= this.FindControl<Canvas>("AnnotationCanvas");
+        img    ??= this.FindControl<Image>("PageImage");
+        return (canvas, img);
+    }
+
     private void AnnotCanvas_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (Tab == null || !Tab.IsAnnotationMode) return;
 
-        var canvas = this.FindControl<Canvas>("AnnotationCanvas");
-        var pageImage = this.FindControl<Image>("PageImage");
+        // Set active canvas + current page index from DataTemplate Tag
+        if (sender is Canvas sc)
+        {
+            _activeAnnotCanvas = sc;
+            if (sc.Tag is int pi) Tab.SetCurrentPageSilent(pi);
+        }
+
+        var (canvas, pageImage) = GetAnnotationElements();
         if (canvas == null || pageImage == null) return;
 
         var point = e.GetPosition(canvas);
@@ -1575,8 +1720,7 @@ public partial class MainWindow : Window
 
     private void AnnotCanvas_PointerMoved(object? sender, PointerEventArgs e)
     {
-        var canvas = this.FindControl<Canvas>("AnnotationCanvas");
-        var pageImage = this.FindControl<Image>("PageImage");
+        var (canvas, pageImage) = GetAnnotationElements();
         if (canvas == null || pageImage == null || Tab == null) return;
 
         var point = e.GetPosition(canvas);
@@ -1642,8 +1786,7 @@ public partial class MainWindow : Window
         if (!_isDrawingAnnotation || Tab == null) return;
         _isDrawingAnnotation = false;
 
-        var canvas = this.FindControl<Canvas>("AnnotationCanvas");
-        var pageImage = this.FindControl<Image>("PageImage");
+        var (canvas, pageImage) = GetAnnotationElements();
         if (canvas == null || pageImage == null) return;
 
         var point = e.GetPosition(canvas);
@@ -2081,8 +2224,7 @@ public partial class MainWindow : Window
 
     private void RenderAnnotationsOnCanvas()
     {
-        var canvas = this.FindControl<Canvas>("AnnotationCanvas");
-        var pageImage = this.FindControl<Image>("PageImage");
+        var (canvas, pageImage) = GetAnnotationElements();
         if (canvas == null || pageImage == null || Tab == null) return;
 
         canvas.Children.Clear();
@@ -2324,8 +2466,7 @@ public partial class MainWindow : Window
 
     private void ClearAnnotationCanvas()
     {
-        var canvas = this.FindControl<Canvas>("AnnotationCanvas");
-        canvas?.Children.Clear();
+        GetAnnotationElements().canvas?.Children.Clear();
     }
 
     private static IBrush TryParseBrush(string hex)
@@ -4732,6 +4873,1238 @@ Annotations: Enable annotation mode, select a tool, draw on page
 
         dialog.Content = panel;
         dialog.Show(this);
+    }
+
+    #endregion
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Phase 6+ Service UI Handlers
+    // ═══════════════════════════════════════════════════════════════
+
+    #region Document Processing
+
+    private async void OnAutoCropClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Auto-cropping pages...";
+            var svc = new AutoCropService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var result = await Task.Run(() => svc.AutoCrop(pdfBytes, 10f));
+            var path = Tab.FilePath!;
+            File.WriteAllBytes(path, result);
+            Tab.LoadPdf(Tab.FilePath!);
+            Tab.StatusText = "Auto-crop complete.";
+            ShowInfoDialog("Auto-Crop", "Pages auto-cropped successfully.");
+        }
+        catch (Exception ex) { Log.Error(ex, "Auto-crop failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnDeskewClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Analyzing and deskewing pages...";
+            var svc = new DeskewService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var analyses = await Task.Run(() => svc.AnalyzeSkew(pdfBytes));
+            var skewed = analyses.Where(a => a.NeedsDeskew).ToList();
+            if (skewed.Count == 0)
+            {
+                ShowInfoDialog("Deskew", "No skewed pages detected.");
+                Tab.StatusText = "Ready";
+                return;
+            }
+            var result = await Task.Run(() => svc.DeskewAll(pdfBytes));
+            File.WriteAllBytes(Tab.FilePath!, result);
+            Tab.LoadPdf(Tab.FilePath!);
+            Tab.StatusText = $"Deskewed {skewed.Count} page(s).";
+            ShowInfoDialog("Deskew", $"Corrected skew on {skewed.Count} page(s).");
+        }
+        catch (Exception ex) { Log.Error(ex, "Deskew failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnBackgroundRemovalClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Removing backgrounds...";
+            var svc = new BackgroundRemovalService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var result = await svc.RemoveBackgroundsAsync(pdfBytes);
+            File.WriteAllBytes(Tab.FilePath!, result);
+            Tab.LoadPdf(Tab.FilePath!);
+            Tab.StatusText = "Background removal complete.";
+            ShowInfoDialog("Background Removal", "Background removal completed successfully.");
+        }
+        catch (Exception ex) { Log.Error(ex, "Background removal failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnHeaderFooterClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var dialog = new Window { Title = "Header / Footer", Width = 500, Height = 480, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+
+            panel.Children.Add(new TextBlock { Text = "Header/Footer Settings", FontSize = 16, FontWeight = FontWeight.Bold });
+
+            var headerLabel = new TextBlock { Text = "Header template (use {page}, {pages}, {date}):" };
+            var headerBox = new TextBox { Text = "Page {page} of {pages}", Padding = new Thickness(6, 4) };
+            var footerLabel = new TextBlock { Text = "Footer template:", Margin = new Thickness(0, 8, 0, 0) };
+            var footerBox = new TextBox { Text = "", Padding = new Thickness(6, 4) };
+
+            var alignLabel = new TextBlock { Text = "Alignment:", Margin = new Thickness(0, 8, 0, 0) };
+            var alignCombo = new ComboBox { Items = { "Center", "Left", "Right" }, SelectedIndex = 0, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+
+            var fontSizeLabel = new TextBlock { Text = "Font size:", Margin = new Thickness(0, 8, 0, 0) };
+            var fontSizeBox = new TextBox { Text = "9", Padding = new Thickness(6, 4) };
+
+            var separatorCheck = new CheckBox { Content = "Draw separator line", IsChecked = true };
+            var skipFirstCheck = new CheckBox { Content = "Skip first page" };
+
+            panel.Children.Add(headerLabel);
+            panel.Children.Add(headerBox);
+            panel.Children.Add(footerLabel);
+            panel.Children.Add(footerBox);
+            panel.Children.Add(alignLabel);
+            panel.Children.Add(alignCombo);
+            panel.Children.Add(fontSizeLabel);
+            panel.Children.Add(fontSizeBox);
+            panel.Children.Add(separatorCheck);
+            panel.Children.Add(skipFirstCheck);
+
+            var applyBtn = new Button { Content = "Apply", Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Padding = new Thickness(20, 8) };
+            applyBtn.Click += async (s, args) =>
+            {
+                try
+                {
+                    var svc = new HeaderFooterService();
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    float.TryParse(fontSizeBox.Text, out float fs);
+                    if (fs < 1) fs = 9;
+
+                    var alignStr = (alignCombo.SelectedItem?.ToString() ?? "Center");
+                    var align = alignStr == "Left" ? HeaderFooterService.HFAlignment.Left
+                              : alignStr == "Right" ? HeaderFooterService.HFAlignment.Right
+                              : HeaderFooterService.HFAlignment.Center;
+
+                    var options = new HeaderFooterService.HFOptions
+                    {
+                        DrawSeparatorLine = separatorCheck.IsChecked == true,
+                        SkipFirstPage = skipFirstCheck.IsChecked == true
+                    };
+                    if (!string.IsNullOrWhiteSpace(headerBox.Text))
+                        options.Header = new HeaderFooterService.HFElement { Template = headerBox.Text, Alignment = align, FontSize = fs };
+                    if (!string.IsNullOrWhiteSpace(footerBox.Text))
+                        options.Footer = new HeaderFooterService.HFElement { Template = footerBox.Text, Alignment = align, FontSize = fs };
+
+                    var result = await svc.AddHeaderFooterAsync(pdfBytes, options);
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Header/Footer", "Header/Footer added successfully.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(applyBtn);
+
+            dialog.Content = new ScrollViewer { Content = panel };
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Header/Footer failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnTableOfContentsClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Detecting headings...";
+            var svc = new TableOfContentsService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var headings = await Task.Run(() => svc.DetectHeadings(pdfBytes));
+            if (headings.Count == 0)
+            {
+                ShowInfoDialog("Table of Contents", "No headings detected in the document.");
+                Tab.StatusText = "Ready";
+                return;
+            }
+            var tocText = svc.GenerateTocText(headings);
+
+            var dialog = new Window { Title = "Table of Contents", Width = 500, Height = 400, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = $"Detected {headings.Count} heading(s):", FontWeight = FontWeight.Bold });
+            panel.Children.Add(new TextBox { Text = tocText, IsReadOnly = true, AcceptsReturn = true, Height = 250, FontFamily = new FontFamily("Consolas") });
+
+            var addBtn = new Button { Content = "Add Bookmarks to PDF", Padding = new Thickness(16, 8), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            addBtn.Click += async (s, args) =>
+            {
+                try
+                {
+                    var result = await Task.Run(() => svc.AddOutlines(pdfBytes, headings));
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Table of Contents", $"Added {headings.Count} bookmark(s) to the PDF.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(addBtn);
+
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "TOC failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnBookletClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Creating booklet...";
+            var svc = new PdfBookletService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var result = await svc.CreateBookletAsync(pdfBytes);
+
+            var saveDialog = new SaveFileDialog { Title = "Save Booklet PDF", DefaultExtension = "pdf" };
+            saveDialog.Filters?.Add(new FileDialogFilter { Name = "PDF Files", Extensions = { "pdf" } });
+            var savePath = await saveDialog.ShowAsync(this);
+            if (!string.IsNullOrEmpty(savePath))
+            {
+                File.WriteAllBytes(savePath, result);
+                ShowInfoDialog("Booklet", $"Booklet saved to: {savePath}");
+            }
+            Tab.StatusText = "Ready";
+        }
+        catch (Exception ex) { Log.Error(ex, "Booklet failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnPrintToPdfClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var dialog = new Window { Title = "Print to PDF", Width = 400, Height = 320, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Page Size:", FontWeight = FontWeight.Bold });
+            var sizeCombo = new ComboBox { Items = { "A4", "A3", "Letter", "Legal" }, SelectedIndex = 0, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            var fitCheck = new CheckBox { Content = "Fit to page", IsChecked = true };
+            var marginLabel = new TextBlock { Text = "Margin (pt):" };
+            var marginBox = new TextBox { Text = "36", Padding = new Thickness(6, 4) };
+            var linearizeCheck = new CheckBox { Content = "Linearize for web" };
+
+            panel.Children.Add(sizeCombo);
+            panel.Children.Add(fitCheck);
+            panel.Children.Add(marginLabel);
+            panel.Children.Add(marginBox);
+            panel.Children.Add(linearizeCheck);
+
+            var printBtn = new Button { Content = "Print to PDF", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            printBtn.Click += async (s, args) =>
+            {
+                try
+                {
+                    var svc = new PrintToPdfService();
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    float.TryParse(marginBox.Text, out float margin);
+
+                    var sizeStr = sizeCombo.SelectedItem?.ToString() ?? "A4";
+                    var targetSize = sizeStr switch
+                    {
+                        "A3" => PrintToPdfService.A3,
+                        "Letter" => PrintToPdfService.Letter,
+                        "Legal" => PrintToPdfService.Legal,
+                        _ => PrintToPdfService.A4
+                    };
+
+                    var options = new PrintOptions
+                    {
+                        TargetPageSize = targetSize,
+                        FitToPage = fitCheck.IsChecked == true,
+                        MarginPt = margin > 0 ? margin : 36,
+                        Linearize = linearizeCheck.IsChecked == true
+                    };
+
+                    var result = await svc.PrintAsync(pdfBytes, options);
+                    if (result.Success)
+                    {
+                        var saveDialog = new SaveFileDialog { Title = "Save Printed PDF", DefaultExtension = "pdf" };
+                        saveDialog.Filters?.Add(new FileDialogFilter { Name = "PDF Files", Extensions = { "pdf" } });
+                        var savePath = await saveDialog.ShowAsync(this);
+                        if (!string.IsNullOrEmpty(savePath))
+                        {
+                            File.WriteAllBytes(savePath, result.Data!);
+                            dialog.Close();
+                            ShowInfoDialog("Print to PDF", $"Saved to: {savePath}");
+                        }
+                    }
+                    else ShowInfoDialog("Error", result.ErrorMessage ?? "Print failed.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(printBtn);
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Print to PDF failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    #endregion
+
+    #region Text & Content
+
+    private async void OnFindReplaceClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var dialog = new Window { Title = "Find & Replace", Width = 450, Height = 300, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Find & Replace in PDF", FontSize = 16, FontWeight = FontWeight.Bold });
+
+            var findLabel = new TextBlock { Text = "Find:" };
+            var findBox = new TextBox { Padding = new Thickness(6, 4) };
+            var replaceLabel = new TextBlock { Text = "Replace with:" };
+            var replaceBox = new TextBox { Padding = new Thickness(6, 4) };
+            var caseCheck = new CheckBox { Content = "Case sensitive" };
+
+            panel.Children.Add(findLabel);
+            panel.Children.Add(findBox);
+            panel.Children.Add(replaceLabel);
+            panel.Children.Add(replaceBox);
+            panel.Children.Add(caseCheck);
+
+            var replaceBtn = new Button { Content = "Replace All", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            replaceBtn.Click += async (s, args) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(findBox.Text)) { ShowInfoDialog("Error", "Search text required."); return; }
+                    var svc = new PdfTextEditService();
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    var result = await Task.Run(() => svc.FindAndReplace(pdfBytes, findBox.Text, replaceBox.Text ?? "", caseCheck.IsChecked == true));
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Find & Replace", $"Replaced all occurrences of \"{findBox.Text}\" with \"{replaceBox.Text}\".");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(replaceBtn);
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Find & Replace failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private void OnFontAnalysisClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new FontReplacementService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var report = svc.GenerateFontReport(pdfBytes);
+
+            var dialog = new Window { Title = "Font Analysis", Width = 600, Height = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            dialog.Content = new ScrollViewer
+            {
+                Content = new TextBox { Text = report, IsReadOnly = true, AcceptsReturn = true, FontFamily = new FontFamily("Consolas"), FontSize = 12, Margin = new Thickness(12) }
+            };
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Font analysis failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnFontReplacementClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new FontReplacementService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var fonts = svc.AnalyzeFonts(pdfBytes);
+
+            var dialog = new Window { Title = "Font Replacement", Width = 500, Height = 400, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Replace Font", FontSize = 16, FontWeight = FontWeight.Bold });
+
+            var sourceLabel = new TextBlock { Text = "Source font:" };
+            var sourceCombo = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            foreach (var f in fonts) sourceCombo.Items.Add(f.FontName);
+            if (sourceCombo.Items.Count > 0) sourceCombo.SelectedIndex = 0;
+
+            var targetLabel = new TextBlock { Text = "Target font:" };
+            var targetCombo = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            foreach (var std in FontReplacementService.StandardFonts.Keys) targetCombo.Items.Add(std);
+            if (targetCombo.Items.Count > 0) targetCombo.SelectedIndex = 0;
+
+            panel.Children.Add(sourceLabel);
+            panel.Children.Add(sourceCombo);
+            panel.Children.Add(targetLabel);
+            panel.Children.Add(targetCombo);
+
+            var replBtn = new Button { Content = "Replace", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            replBtn.Click += async (s, args) =>
+            {
+                try
+                {
+                    var options = new FontReplacementOptions
+                    {
+                        SourceFontName = sourceCombo.SelectedItem?.ToString() ?? "",
+                        TargetFontName = targetCombo.SelectedItem?.ToString() ?? "Helvetica"
+                    };
+                    var result = await Task.Run(() => svc.ReplaceFont(pdfBytes, options));
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Font Replacement", "Font replaced successfully.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(replBtn);
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Font replacement failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnTableEditorClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Detecting tables...";
+            var svc = new TableEditorService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var tables = await Task.Run(() => svc.DetectAllTables(pdfBytes));
+
+            if (tables.Count == 0)
+            {
+                ShowInfoDialog("Table Editor", "No tables detected in the document.");
+                Tab.StatusText = "Ready";
+                return;
+            }
+
+            var report = new System.Text.StringBuilder();
+            foreach (var table in tables)
+            {
+                report.AppendLine($"Page {table.PageIndex + 1}: Table {table.TableIndex + 1} ({table.RowCount} rows × {table.ColumnCount} cols)");
+                report.AppendLine(svc.ExtractTableAsCsv(table));
+                report.AppendLine();
+            }
+
+            var dialog = new Window { Title = $"Table Editor - {tables.Count} table(s) found", Width = 700, Height = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new DockPanel { Margin = new Thickness(12) };
+
+            var exportBtn = new Button { Content = "Export as CSV", Padding = new Thickness(12, 6), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Margin = new Thickness(0, 0, 0, 8) };
+            DockPanel.SetDock(exportBtn, Dock.Top);
+            exportBtn.Click += async (s, args) =>
+            {
+                var saveDialog = new SaveFileDialog { Title = "Save CSV", DefaultExtension = "csv" };
+                saveDialog.Filters?.Add(new FileDialogFilter { Name = "CSV Files", Extensions = { "csv" } });
+                var savePath = await saveDialog.ShowAsync(this);
+                if (!string.IsNullOrEmpty(savePath))
+                    File.WriteAllText(savePath, report.ToString());
+            };
+            panel.Children.Add(exportBtn);
+            panel.Children.Add(new TextBox { Text = report.ToString(), IsReadOnly = true, AcceptsReturn = true, FontFamily = new FontFamily("Consolas"), FontSize = 11 });
+
+            dialog.Content = panel;
+            dialog.Show(this);
+            Tab.StatusText = $"Found {tables.Count} table(s).";
+        }
+        catch (Exception ex) { Log.Error(ex, "Table editor failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    #endregion
+
+    #region Image Tools
+
+    private async void OnExtractImagesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var folderDialog = new OpenFolderDialog { Title = "Select output folder for images" };
+            var folder = await folderDialog.ShowAsync(this);
+            if (string.IsNullOrEmpty(folder)) return;
+
+            Tab.StatusText = "Extracting images...";
+            var svc = new ImageExtractionService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var count = await svc.ExtractToFolderAsync(pdfBytes, folder);
+            Tab.StatusText = $"Extracted {count} image(s).";
+            ShowInfoDialog("Image Extraction", $"Extracted {count} image(s) to:\n{folder}");
+        }
+        catch (Exception ex) { Log.Error(ex, "Image extraction failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnCompressImagesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Compressing images...";
+            var svc = new ImageCompressService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var result = await svc.CompressAsync(pdfBytes);
+
+            File.WriteAllBytes(Tab.FilePath!, result.OutputPdf);
+            Tab.LoadPdf(Tab.FilePath!);
+
+            var ratio = result.CompressionRatio.ToString("P1");
+            Tab.StatusText = $"Compressed {result.ImagesProcessed} image(s), {ratio} reduction.";
+            ShowInfoDialog("Image Compression",
+                $"Original: {result.OriginalSize:N0} bytes\nCompressed: {result.CompressedSize:N0} bytes\nRatio: {ratio}\nImages processed: {result.ImagesProcessed}");
+        }
+        catch (Exception ex) { Log.Error(ex, "Image compression failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnReplaceImageClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new ImageReplaceService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var images = svc.ListImages(pdfBytes);
+
+            if (images.Count == 0)
+            {
+                ShowInfoDialog("Replace Image", "No images found in the document.");
+                return;
+            }
+
+            // Pick replacement image file
+            var openDialog = new OpenFileDialog { Title = "Select replacement image", AllowMultiple = false };
+            openDialog.Filters?.Add(new FileDialogFilter { Name = "Images", Extensions = { "png", "jpg", "jpeg", "bmp" } });
+            var files = await openDialog.ShowAsync(this);
+            if (files == null || files.Length == 0) return;
+
+            var newImageBytes = File.ReadAllBytes(files[0]);
+            var result = svc.ReplaceAllImages(pdfBytes, newImageBytes);
+            File.WriteAllBytes(Tab.FilePath!, result);
+            Tab.LoadPdf(Tab.FilePath!);
+            ShowInfoDialog("Replace Image", $"Replaced {images.Count} image(s) in the document.");
+        }
+        catch (Exception ex) { Log.Error(ex, "Image replace failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnInsertBarcodeClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var dialog = new Window { Title = "Insert Barcode", Width = 450, Height = 380, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Insert Barcode", FontSize = 16, FontWeight = FontWeight.Bold });
+
+            var dataLabel = new TextBlock { Text = "Data / URL:" };
+            var dataBox = new TextBox { Text = "https://example.com", Padding = new Thickness(6, 4) };
+            var typeLabel = new TextBlock { Text = "Type:" };
+            var typeCombo = new ComboBox { Items = { "QR", "Code128", "Code39", "EAN13", "DataMatrix", "PDF417" }, SelectedIndex = 0, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            var sizeLabel = new TextBlock { Text = "Size (px):" };
+            var sizeBox = new TextBox { Text = "300", Padding = new Thickness(6, 4) };
+            var pageLabel = new TextBlock { Text = $"Page (1-{Tab.PageCount}):" };
+            var pageBox = new TextBox { Text = (Tab.CurrentPageIndex + 1).ToString(), Padding = new Thickness(6, 4) };
+
+            panel.Children.Add(dataLabel);
+            panel.Children.Add(dataBox);
+            panel.Children.Add(typeLabel);
+            panel.Children.Add(typeCombo);
+            panel.Children.Add(sizeLabel);
+            panel.Children.Add(sizeBox);
+            panel.Children.Add(pageLabel);
+            panel.Children.Add(pageBox);
+
+            var insertBtn = new Button { Content = "Insert", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            insertBtn.Click += async (s, args) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(dataBox.Text)) { ShowInfoDialog("Error", "Data required."); return; }
+
+                    var svc = new BarcodeService();
+                    int.TryParse(sizeBox.Text, out int size);
+                    if (size < 50) size = 300;
+                    int.TryParse(pageBox.Text, out int page);
+                    page = Math.Clamp(page, 1, Tab.PageCount) - 1;
+
+                    var typeStr = typeCombo.SelectedItem?.ToString() ?? "QR";
+                    var bType = Enum.TryParse<BarcodeService.BarcodeType>(typeStr, true, out var bt) ? bt : BarcodeService.BarcodeType.QRCode;
+
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    var result = await Task.Run(() => svc.GenerateAndEmbed(pdfBytes, dataBox.Text, bType, page, size));
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Barcode", $"Barcode inserted on page {page + 1}.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(insertBtn);
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Insert barcode failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    #endregion
+
+    #region Security Extended
+
+    private async void OnMetadataScrubberClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new MetadataScrubberService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var summary = await svc.InspectAsync(pdfBytes);
+
+            if (!summary.HasAnyMetadata)
+            {
+                ShowInfoDialog("Metadata Scrubber", "No metadata found in the document.");
+                return;
+            }
+
+            var info = $"Title: {summary.Title ?? "(none)"}\nAuthor: {summary.Author ?? "(none)"}\nSubject: {summary.Subject ?? "(none)"}\nCreator: {summary.Creator ?? "(none)"}\nProducer: {summary.Producer ?? "(none)"}\nKeywords: {summary.Keywords ?? "(none)"}\nHas XMP: {summary.HasXmp}\nCustom keys: {summary.CustomKeys?.Count ?? 0}";
+
+            var dialog = new Window { Title = "Metadata Scrubber", Width = 500, Height = 400, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Current Metadata", FontSize = 16, FontWeight = FontWeight.Bold });
+            panel.Children.Add(new TextBox { Text = info, IsReadOnly = true, AcceptsReturn = true, Height = 200 });
+
+            var preserveTitleCheck = new CheckBox { Content = "Preserve title" };
+            panel.Children.Add(preserveTitleCheck);
+
+            var scrubBtn = new Button { Content = "Scrub All Metadata", Padding = new Thickness(16, 8), Margin = new Thickness(0, 8, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Foreground = Brushes.OrangeRed };
+            scrubBtn.Click += async (s, args) =>
+            {
+                try
+                {
+                    var result = await svc.ScrubAsync(pdfBytes, preserveTitleCheck.IsChecked == true);
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Metadata Scrubber", "All metadata has been removed.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(scrubBtn);
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Metadata scrubber failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private void OnSanitizeDocumentClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new DocumentSanitizerService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var report = svc.Inspect(pdfBytes);
+
+            if (report.TotalItemsRemoved == 0 && !report.HadOpenAction)
+            {
+                ShowInfoDialog("Sanitize Document", "Document is clean — no threats found.");
+                return;
+            }
+
+            var reportText = $"JavaScript actions: {report.JavaScriptActionsRemoved}\nEmbedded files: {report.EmbeddedFilesRemoved}\nExternal links: {report.ExternalLinksRemoved}\nForm actions: {report.FormActionsRemoved}\nMultiMedia: {report.MultiMediaRemoved}\nOpen actions: {(report.HadOpenAction ? "Yes" : "No")}\nMetadata fields: {report.MetadataFieldsCleaned}";
+
+            var dialog = new Window { Title = "Sanitize Document", Width = 500, Height = 400, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Threat Analysis", FontSize = 16, FontWeight = FontWeight.Bold });
+            panel.Children.Add(new TextBox { Text = reportText, IsReadOnly = true, AcceptsReturn = true, Height = 180 });
+
+            var sanitizeBtn = new Button { Content = "Sanitize Now", Padding = new Thickness(16, 8), Margin = new Thickness(0, 8, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Foreground = Brushes.OrangeRed };
+            sanitizeBtn.Click += (s, args) =>
+            {
+                try
+                {
+                    var (sanitized, _) = svc.Sanitize(pdfBytes);
+                    File.WriteAllBytes(Tab.FilePath!, sanitized);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Sanitize", "Document sanitized successfully.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(sanitizeBtn);
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Sanitize failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    #endregion
+
+    #region Accessibility
+
+    private void OnAccessibilityCheckClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new AccessibilityCheckerService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var report = svc.CheckAccessibility(pdfBytes, IOPath.GetFileName(Tab.FilePath!));
+            var reportText = svc.GenerateReportText(report);
+
+            var dialog = new Window { Title = $"Accessibility Report — Score: {report.ComplianceScore}%", Width = 700, Height = 600, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            dialog.Content = new ScrollViewer
+            {
+                Content = new TextBox { Text = reportText, IsReadOnly = true, AcceptsReturn = true, FontFamily = new FontFamily("Consolas"), FontSize = 11, Margin = new Thickness(12) }
+            };
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Accessibility check failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnAutoTagClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Auto-tagging PDF...";
+            var svc = new AutoTagService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+
+            if (svc.IsTagged(pdfBytes))
+            {
+                ShowInfoDialog("Auto-Tag", "Document is already tagged.");
+                Tab.StatusText = "Ready";
+                return;
+            }
+
+            var result = await Task.Run(() => svc.AutoTag(pdfBytes));
+            File.WriteAllBytes(Tab.FilePath!, result.TaggedPdf);
+            Tab.LoadPdf(Tab.FilePath!);
+            Tab.StatusText = "Auto-tagging complete.";
+            ShowInfoDialog("Auto-Tag", $"Tagged {result.TotalElementsTagged} elements:\n• Paragraphs: {result.ParagraphsTagged}\n• Headings: {result.HeadingsTagged}\n• Images: {result.ImagesTagged}\n• Tables: {result.TablesTagged}\n• Lists: {result.ListsTagged}");
+        }
+        catch (Exception ex) { Log.Error(ex, "Auto-tag failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private void OnAltTextEditorClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new AltTextEditorService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var images = svc.GetImageAltTexts(pdfBytes);
+
+            if (images.Count == 0)
+            {
+                ShowInfoDialog("Alt Text Editor", "No images found in the document.");
+                return;
+            }
+
+            var missing = svc.CountMissingAltTexts(pdfBytes);
+            var report = svc.GenerateAltTextReport(pdfBytes);
+
+            var dialog = new Window { Title = $"Alt Text Editor — {missing} missing", Width = 600, Height = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            dialog.Content = new ScrollViewer
+            {
+                Content = new TextBox { Text = report, IsReadOnly = true, AcceptsReturn = true, FontFamily = new FontFamily("Consolas"), FontSize = 11, Margin = new Thickness(12) }
+            };
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Alt text editor failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    #endregion
+
+    #region Archiving
+
+    private async void OnConvertPdfAClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Converting to PDF/A-2B...";
+            var svc = new PdfArchiverService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var result = await svc.ConvertToPdfA2BAsync(pdfBytes);
+
+            if (result.Success)
+            {
+                var saveDialog = new SaveFileDialog { Title = "Save PDF/A", DefaultExtension = "pdf" };
+                saveDialog.Filters?.Add(new FileDialogFilter { Name = "PDF Files", Extensions = { "pdf" } });
+                var savePath = await saveDialog.ShowAsync(this);
+                if (!string.IsNullOrEmpty(savePath))
+                {
+                    File.WriteAllBytes(savePath, result.Data!);
+                    ShowInfoDialog("PDF/A", $"PDF/A-2B saved to: {savePath}");
+                }
+            }
+            else ShowInfoDialog("Error", result.ErrorMessage ?? "Conversion failed.");
+            Tab.StatusText = "Ready";
+        }
+        catch (Exception ex) { Log.Error(ex, "PDF/A conversion failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnInspectPdfAClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new PdfArchiverService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var info = await svc.InspectConformanceAsync(pdfBytes);
+
+            var text = $"Has PDF/A XMP claim: {info.HasXmpPdfAClaim}\nPDF/A Part: {info.PdfAPart}\nConformance Level: {info.PdfAConformanceLevel}\nConformance: {info.ConformanceLabel}\nPages: {info.PageCount}\nPDF Version: {info.PdfVersion}";
+            ShowInfoDialog("PDF/A Conformance", text);
+        }
+        catch (Exception ex) { Log.Error(ex, "PDF/A inspection failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private async void OnConvertPdfXClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            Tab.StatusText = "Converting to PDF/X-4...";
+            var svc = new PdfXService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var result = await Task.Run(() => svc.ConvertToPdfX(pdfBytes));
+
+            var saveDialog = new SaveFileDialog { Title = "Save PDF/X", DefaultExtension = "pdf" };
+            saveDialog.Filters?.Add(new FileDialogFilter { Name = "PDF Files", Extensions = { "pdf" } });
+            var savePath = await saveDialog.ShowAsync(this);
+            if (!string.IsNullOrEmpty(savePath))
+            {
+                File.WriteAllBytes(savePath, result);
+                ShowInfoDialog("PDF/X", $"PDF/X-4 saved to: {savePath}");
+            }
+            Tab.StatusText = "Ready";
+        }
+        catch (Exception ex) { Log.Error(ex, "PDF/X conversion failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private void OnInspectPdfXClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new PdfXService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var report = svc.GenerateReport(pdfBytes);
+            ShowInfoDialog("PDF/X Inspection", report);
+        }
+        catch (Exception ex) { Log.Error(ex, "PDF/X inspection failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    #endregion
+
+    #region Form Advanced
+
+    private void OnCalculationFieldsClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new CalculationFieldService();
+            var dialog = new Window { Title = "Calculation Fields", Width = 550, Height = 450, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Calculation Rules", FontSize = 16, FontWeight = FontWeight.Bold });
+            panel.Children.Add(new TextBlock { Text = $"Current rules: {svc.Rules.Count}", Opacity = 0.6 });
+
+            var targetLabel = new TextBlock { Text = "Target field name:" };
+            var targetBox = new TextBox { Padding = new Thickness(6, 4) };
+            var typeLabel = new TextBlock { Text = "Calculation type:" };
+            var typeCombo = new ComboBox { Items = { "Sum", "Average", "Min", "Max", "Count", "Product" }, SelectedIndex = 0, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            var sourceLabel = new TextBlock { Text = "Source fields (comma-separated):" };
+            var sourceBox = new TextBox { Padding = new Thickness(6, 4) };
+
+            panel.Children.Add(targetLabel);
+            panel.Children.Add(targetBox);
+            panel.Children.Add(typeLabel);
+            panel.Children.Add(typeCombo);
+            panel.Children.Add(sourceLabel);
+            panel.Children.Add(sourceBox);
+
+            var addBtn = new Button { Content = "Add Rule & Apply", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            addBtn.Click += (s, args) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(targetBox.Text) || string.IsNullOrWhiteSpace(sourceBox.Text))
+                    { ShowInfoDialog("Error", "Target and source fields required."); return; }
+
+                    var typeStr = typeCombo.SelectedItem?.ToString() ?? "Sum";
+                    var calcType = Enum.TryParse<CalculationType>(typeStr, out var ct) ? ct : CalculationType.Sum;
+                    var sources = sourceBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+                    svc.AddRule(new CalculationRule { TargetField = targetBox.Text.Trim(), Type = calcType, SourceFields = sources });
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    var result = svc.EvaluateAndApply(pdfBytes);
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Calculation Fields", "Rule added and applied.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(addBtn);
+            dialog.Content = new ScrollViewer { Content = panel };
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Calculation fields failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private void OnConditionalLogicClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new ConditionalLogicService();
+            var dialog = new Window { Title = "Conditional Logic", Width = 550, Height = 480, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Conditional Logic Rules", FontSize = 16, FontWeight = FontWeight.Bold });
+            panel.Children.Add(new TextBlock { Text = $"Current rules: {svc.Rules.Count}", Opacity = 0.6 });
+
+            var targetLabel = new TextBlock { Text = "Target field:" };
+            var targetBox = new TextBox { Padding = new Thickness(6, 4) };
+            var actionLabel = new TextBlock { Text = "Action:" };
+            var actionCombo = new ComboBox { Items = { "Show", "Hide", "Enable", "Disable", "SetValue", "SetRequired", "SetReadOnly" }, SelectedIndex = 0, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            var condFieldLabel = new TextBlock { Text = "Condition: When field..." };
+            var condFieldBox = new TextBox { Padding = new Thickness(6, 4) };
+            var compLabel = new TextBlock { Text = "...is:" };
+            var compCombo = new ComboBox { Items = { "Equals", "NotEquals", "Contains", "IsEmpty", "IsNotEmpty" }, SelectedIndex = 0, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            var valueLabel = new TextBlock { Text = "...value:" };
+            var valueBox = new TextBox { Padding = new Thickness(6, 4) };
+
+            panel.Children.Add(targetLabel); panel.Children.Add(targetBox);
+            panel.Children.Add(actionLabel); panel.Children.Add(actionCombo);
+            panel.Children.Add(condFieldLabel); panel.Children.Add(condFieldBox);
+            panel.Children.Add(compLabel); panel.Children.Add(compCombo);
+            panel.Children.Add(valueLabel); panel.Children.Add(valueBox);
+
+            var addBtn = new Button { Content = "Add Rule & Apply", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            addBtn.Click += (s, args) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(targetBox.Text) || string.IsNullOrWhiteSpace(condFieldBox.Text))
+                    { ShowInfoDialog("Error", "Target and condition field required."); return; }
+
+                    var action = Enum.TryParse<ConditionalAction>(actionCombo.SelectedItem?.ToString(), out var a) ? a : ConditionalAction.Show;
+                    var comp = Enum.TryParse<ComparisonOperator>(compCombo.SelectedItem?.ToString(), out var c) ? c : ComparisonOperator.Equals;
+
+                    svc.AddRule(new ConditionalRule
+                    {
+                        TargetField = targetBox.Text.Trim(),
+                        Action = action,
+                        Conditions = new List<Condition>
+                        {
+                            new() { FieldName = condFieldBox.Text.Trim(), Comparison = comp, Value = valueBox.Text?.Trim() ?? "" }
+                        }
+                    });
+
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    var result = svc.EvaluateAndApply(pdfBytes);
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Conditional Logic", "Rule added and applied.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(addBtn);
+            dialog.Content = new ScrollViewer { Content = panel };
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Conditional logic failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private void OnFormValidationClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new FormValidationService();
+            var formSvc = new PdfFormService();
+            var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+            var fields = formSvc.GetFormFields(pdfBytes);
+
+            if (fields.Count == 0)
+            {
+                ShowInfoDialog("Form Validation", "No form fields found in the document.");
+                return;
+            }
+
+            // Auto-generate basic rules
+            svc.AutoGenerateRules(fields);
+            var formData = formSvc.ExportFormData(pdfBytes);
+            var validationResult = svc.Validate(formData.FieldValues);
+
+            var report = new System.Text.StringBuilder();
+            report.AppendLine($"Form Fields: {fields.Count}");
+            report.AppendLine($"Validation Rules: {svc.Rules.Count}");
+            report.AppendLine();
+
+            if (validationResult.IsValid)
+                report.AppendLine("All fields pass validation.");
+            else
+            {
+                report.AppendLine($"{validationResult.Errors.Count} validation error(s):");
+                foreach (var err in validationResult.Errors)
+                    report.AppendLine($"  • {err.FieldName}: {err.ErrorMessage}");
+            }
+
+            ShowInfoDialog("Form Validation", report.ToString());
+        }
+        catch (Exception ex) { Log.Error(ex, "Form validation failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    #endregion
+
+    #region Electronic Signature
+
+    private async void OnElectronicSignatureClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var dialog = new Window { Title = "Electronic Signature", Width = 500, Height = 440, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Electronic Signature", FontSize = 16, FontWeight = FontWeight.Bold });
+
+            var nameLabel = new TextBlock { Text = "Signer name:" };
+            var nameBox = new TextBox { Padding = new Thickness(6, 4) };
+            var reasonLabel = new TextBlock { Text = "Reason:" };
+            var reasonBox = new TextBox { Text = "Approved", Padding = new Thickness(6, 4) };
+            var locationLabel = new TextBlock { Text = "Location:" };
+            var locationBox = new TextBox { Padding = new Thickness(6, 4) };
+            var pageLabel = new TextBlock { Text = $"Page (1-{Tab.PageCount}):" };
+            var pageBox = new TextBox { Text = (Tab.CurrentPageIndex + 1).ToString(), Padding = new Thickness(6, 4) };
+
+            var typeLabel = new TextBlock { Text = "Signature type:" };
+            var typeCombo = new ComboBox { Items = { "Typed (Cursive Font)", "Upload Image" }, SelectedIndex = 0, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+
+            panel.Children.Add(nameLabel); panel.Children.Add(nameBox);
+            panel.Children.Add(reasonLabel); panel.Children.Add(reasonBox);
+            panel.Children.Add(locationLabel); panel.Children.Add(locationBox);
+            panel.Children.Add(pageLabel); panel.Children.Add(pageBox);
+            panel.Children.Add(typeLabel); panel.Children.Add(typeCombo);
+
+            var signBtn = new Button { Content = "Sign Document", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            signBtn.Click += async (s, args) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(nameBox.Text)) { ShowInfoDialog("Error", "Signer name required."); return; }
+
+                    var svc = new ElectronicSignatureService();
+                    byte[] sigImage;
+
+                    if (typeCombo.SelectedIndex == 1)
+                    {
+                        // Upload image
+                        var openDialog = new OpenFileDialog { Title = "Select signature image", AllowMultiple = false };
+                        openDialog.Filters?.Add(new FileDialogFilter { Name = "Images", Extensions = { "png", "jpg", "jpeg" } });
+                        var files = await openDialog.ShowAsync(this);
+                        if (files == null || files.Length == 0) return;
+                        sigImage = File.ReadAllBytes(files[0]);
+                    }
+                    else
+                    {
+                        sigImage = svc.CreateTypedSignature(nameBox.Text);
+                    }
+
+                    int.TryParse(pageBox.Text, out int page);
+                    page = Math.Clamp(page, 1, Tab.PageCount) - 1;
+
+                    var sig = new ElectronicSignatureService.ElectronicSignature
+                    {
+                        SignerName = nameBox.Text.Trim(),
+                        Reason = reasonBox.Text?.Trim() ?? "",
+                        Location = locationBox.Text?.Trim() ?? "",
+                        SignatureImage = sigImage,
+                        SignedDate = DateTime.Now
+                    };
+
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    var result = await Task.Run(() => svc.AddSignature(pdfBytes, sig, page));
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Electronic Signature", $"Signature by \"{nameBox.Text}\" added to page {page + 1}.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(signBtn);
+            dialog.Content = new ScrollViewer { Content = panel };
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Electronic signature failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    #endregion
+
+    #region Productivity
+
+    private void OnQuickActionsClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new QuickActionsService();
+            var templates = svc.GetBuiltInTemplates();
+
+            var dialog = new Window { Title = "Quick Actions", Width = 600, Height = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Quick Actions", FontSize = 16, FontWeight = FontWeight.Bold });
+            panel.Children.Add(new TextBlock { Text = $"Built-in templates: {templates.Count} | Custom actions: {svc.Actions.Count}", Opacity = 0.6 });
+
+            var listBox = new ListBox { Height = 300 };
+            foreach (var t in templates)
+                listBox.Items.Add($"{t.Name} — {t.Description}");
+            foreach (var a in svc.Actions)
+                listBox.Items.Add($"[Custom] {a.Name} — {a.Description}");
+            if (listBox.Items.Count > 0) listBox.SelectedIndex = 0;
+
+            panel.Children.Add(listBox);
+
+            var runBtn = new Button { Content = "Run Selected Action", Padding = new Thickness(16, 8), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            runBtn.Click += (s, args) =>
+            {
+                try
+                {
+                    var idx = listBox.SelectedIndex;
+                    if (idx < 0) return;
+
+                    string actionId;
+                    if (idx < templates.Count) actionId = templates[idx].Id;
+                    else actionId = svc.Actions[idx - templates.Count].Id;
+
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    var result = svc.Execute(pdfBytes, actionId);
+                    File.WriteAllBytes(Tab.FilePath!, result);
+                    Tab.LoadPdf(Tab.FilePath!);
+                    dialog.Close();
+                    ShowInfoDialog("Quick Actions", "Action executed successfully.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(runBtn);
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Quick actions failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private void OnTemplatesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Tab == null || !Tab.IsDocumentLoaded) return;
+        try
+        {
+            var svc = new TemplateService();
+            var dialog = new Window { Title = "Templates", Width = 550, Height = 420, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Document Templates", FontSize = 16, FontWeight = FontWeight.Bold });
+            panel.Children.Add(new TextBlock { Text = $"Templates: {svc.Templates.Count} | Categories: {svc.GetCategories().Count}", Opacity = 0.6 });
+
+            var nameLabel = new TextBlock { Text = "Template name:", Margin = new Thickness(0, 8, 0, 0) };
+            var nameBox = new TextBox { Padding = new Thickness(6, 4) };
+            var descLabel = new TextBlock { Text = "Description:" };
+            var descBox = new TextBox { Padding = new Thickness(6, 4) };
+            var catLabel = new TextBlock { Text = "Category:" };
+            var catBox = new TextBox { Text = "General", Padding = new Thickness(6, 4) };
+
+            panel.Children.Add(nameLabel); panel.Children.Add(nameBox);
+            panel.Children.Add(descLabel); panel.Children.Add(descBox);
+            panel.Children.Add(catLabel); panel.Children.Add(catBox);
+
+            var saveBtn = new Button { Content = "Save as Template", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            saveBtn.Click += (s, args) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(nameBox.Text)) { ShowInfoDialog("Error", "Name required."); return; }
+                    var pdfBytes = File.ReadAllBytes(Tab.FilePath!);
+                    svc.SaveAsTemplate(pdfBytes, nameBox.Text.Trim(), descBox.Text?.Trim() ?? "", catBox.Text?.Trim() ?? "General");
+                    dialog.Close();
+                    ShowInfoDialog("Templates", $"Template \"{nameBox.Text}\" saved.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            panel.Children.Add(saveBtn);
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Templates failed"); ShowInfoDialog("Error", ex.Message); }
+    }
+
+    private void OnWatchFolderClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var svc = new WatchFolderService();
+            var dialog = new Window { Title = "Watch Folder", Width = 550, Height = 420, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "Watch Folder", FontSize = 16, FontWeight = FontWeight.Bold });
+            panel.Children.Add(new TextBlock { Text = svc.IsRunning ? "Status: RUNNING" : "Status: Stopped", Foreground = svc.IsRunning ? Brushes.Green : Brushes.Gray });
+
+            var watchLabel = new TextBlock { Text = "Watch folder path:" };
+            var watchBox = new TextBox { Padding = new Thickness(6, 4) };
+            var outputLabel = new TextBlock { Text = "Output folder path:" };
+            var outputBox = new TextBox { Padding = new Thickness(6, 4) };
+            var actionLabel = new TextBlock { Text = "Action:" };
+            var actionCombo = new ComboBox { Items = { "Copy", "Compress", "OCR", "Watermark", "ConvertToPdfA", "RemoveMetadata" }, SelectedIndex = 0, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+
+            panel.Children.Add(watchLabel); panel.Children.Add(watchBox);
+            panel.Children.Add(outputLabel); panel.Children.Add(outputBox);
+            panel.Children.Add(actionLabel); panel.Children.Add(actionCombo);
+
+            var startBtn = new Button { Content = "Start Watching", Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
+            var stopBtn = new Button { Content = "Stop", Padding = new Thickness(16, 8), Margin = new Thickness(8, 12, 0, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
+
+            startBtn.Click += (s, args) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(watchBox.Text) || string.IsNullOrWhiteSpace(outputBox.Text))
+                    { ShowInfoDialog("Error", "Watch and output paths required."); return; }
+
+                    var action = Enum.TryParse<WatchFolderAction>(actionCombo.SelectedItem?.ToString(), out var a) ? a : WatchFolderAction.Copy;
+                    svc.Start(new WatchFolderConfig
+                    {
+                        WatchPath = watchBox.Text.Trim(),
+                        OutputPath = outputBox.Text.Trim(),
+                        Action = action
+                    });
+                    ShowInfoDialog("Watch Folder", "Watching started. New PDF files will be processed automatically.");
+                }
+                catch (Exception ex) { ShowInfoDialog("Error", ex.Message); }
+            };
+            stopBtn.Click += (s, args) =>
+            {
+                svc.Stop();
+                ShowInfoDialog("Watch Folder", "Watching stopped.");
+            };
+
+            var btnPanel = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
+            btnPanel.Children.Add(startBtn);
+            btnPanel.Children.Add(stopBtn);
+            panel.Children.Add(btnPanel);
+
+            dialog.Content = panel;
+            dialog.Show(this);
+        }
+        catch (Exception ex) { Log.Error(ex, "Watch folder failed"); ShowInfoDialog("Error", ex.Message); }
     }
 
     #endregion
