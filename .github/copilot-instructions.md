@@ -32,6 +32,8 @@
 | Change a dependency | Update `README.md` and `SETUP.md` |
 | Add a feature | Update feature documentation in `docs/` |
 
+**When bumping or changing a release version, you MUST update the README and all project version markers.** Specifically: update `Directory.Build.props` (the canonical version), `CHANGELOG.md` (release notes), `README.md` (Quick Start/version badges), any installer metadata (WiX/MSI manifest or `installer/*` files), and add an entry to `PLAN.md` Change Log noting the version bump and files changed. Do not change version numbers in source without updating these locations.
+
 ### Rule 2: Track Changes Made
 
 At the end of EVERY work session, update this section in `PLAN.md`:
@@ -1063,6 +1065,7 @@ When helping with this codebase, ALWAYS:
 10. **Track issues** - if something is broken, add to Active Issues table in `PLAN.md`
 11. **Use UXWing SVG icons** for any new UI elements (free for commercial use)
 12. **Respect license compatibility** - AGPL v3 for iText7/pdf2docx, MIT/Apache for others
+13. **When bumping releases:** update `Directory.Build.props`, `CHANGELOG.md`, `README.md`, installer metadata (`installer/*`), and add a Change Log entry in `PLAN.md` before suggesting a tag or release. Always ask before performing git tag/push/release actions (H-1).
 
 ---
 
@@ -1094,6 +1097,7 @@ When helping with this codebase, ALWAYS:
 | Start phase | `PLAN.md` (Phase Status) |
 | Complete phase | `PLAN.md` (Phase Status, Change Log) |
 | Add icons | Download from UXWing, save to `Resources/Icons/`, update icon list |
+| Bump version / Release | Update `Directory.Build.props`, `CHANGELOG.md`, `README.md`, installer metadata (`installer/*`), and add Change Log entry in `PLAN.md` |
 
 **Documentation is not optional. It is part of the definition of done.**
 
