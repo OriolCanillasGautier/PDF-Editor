@@ -44,7 +44,7 @@ if (-not $AppVersion) {
 
 Write-Host "Publishing to $publishDirFull"
 
-dotnet publish "$PSScriptRoot\..\src\PDFEditor.UI\PDFEditor.UI.csproj" -c $Configuration -r $Runtime --self-contained true -o $publishDirFull
+dotnet publish "$PSScriptRoot\..\src\PDFEditor.UI\PDFEditor.UI.csproj" -c $Configuration -r $Runtime --self-contained true -o "$publishDirFull"
 
 # ─── Build & bundle pdf2docx-cli sidecar ─────────────────────────────────────
 $sidecarExe = Join-Path $publishDirFull "pdf2docx-cli.exe"
@@ -123,14 +123,14 @@ New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 
 $harvestedWxs = Join-Path $objDir "harvested.wxs"
 
-& $heatExe dir $publishDirFull -cg PublishedFiles -dr INSTALLFOLDER -gg -sreg -srd -sfrag -out $harvestedWxs
+& $heatExe dir "$publishDirFull" -cg PublishedFiles -dr INSTALLFOLDER -gg -sreg -srd -sfrag -out "$harvestedWxs"
 
 $baseObj = Join-Path $objDir "base.wixobj"
 $harvestedObj = Join-Path $objDir "harvested.wixobj"
 
-& $candleExe -out $baseObj "$installerDir\PDFEditor.Installer.v3.wxs" -dAppVersion=$AppVersion
-& $candleExe -out $harvestedObj $harvestedWxs
+& $candleExe "$installerDir\PDFEditor.Installer.v3.wxs" "-dPublishDir=$publishDirFull" "-dAppVersion=$AppVersion" -ext WixUIExtension -out "$baseObj"
+& $candleExe "$harvestedWxs" -out "$harvestedObj"
 
-& $lightExe -ext WixUIExtension -out $msiPath -b publishDir=$publishDirFull -b $publishDirFull -b $installerDir $baseObj $harvestedObj
+& $lightExe -ext WixUIExtension -out "$msiPath" -b "$publishDirFull" -b "$installerDir" "$baseObj" "$harvestedObj"
 
 Write-Host "MSI created: $msiPath"
