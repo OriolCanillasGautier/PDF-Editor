@@ -210,23 +210,30 @@ jobs:
 
         New-Item -ItemType Directory -Force -Path installer/obj | Out-Null
 
+        # Resolve all paths to absolute Windows paths (WiX v3 chokes on relative/forward-slash paths)
+        $publishDir = (Resolve-Path '.\publish').Path
+        $installerDir = (Resolve-Path '.\installer').Path
+        $objDir = "$installerDir\obj"
+        Write-Host "Publish dir : $publishDir"
+        Write-Host "Installer dir: $installerDir"
+
         Write-Host "==> heat: harvesting publish dir..."
-        & "$wixBin\heat.exe" dir ./publish/ -cg PublishedFiles -dr INSTALLFOLDER -gg -sreg -srd -sfrag -out installer/obj/harvested.wxs
+        & "$wixBin\heat.exe" dir "$publishDir" -cg PublishedFiles -dr INSTALLFOLDER -gg -sreg -srd -sfrag -out "$objDir\harvested.wxs"
         if ($LASTEXITCODE -ne 0) { throw "heat.exe failed (exit $LASTEXITCODE)" }
 
         Write-Host "==> candle: compiling base WXS..."
-        & "$wixBin\candle.exe" installer/PDFEditor.Installer.v3.wxs -dPublishDir=./publish/ -dAppVersion=$appVersion -ext WixUIExtension -out installer/obj/base.wixobj
+        & "$wixBin\candle.exe" "$installerDir\PDFEditor.Installer.v3.wxs" "-dPublishDir=$publishDir" "-dAppVersion=$appVersion" -ext WixUIExtension -out "$objDir\base.wixobj"
         if ($LASTEXITCODE -ne 0) { throw "candle.exe (base) failed (exit $LASTEXITCODE)" }
 
         Write-Host "==> candle: compiling harvested WXS..."
-        & "$wixBin\candle.exe" installer/obj/harvested.wxs -out installer/obj/harvested.wixobj
+        & "$wixBin\candle.exe" "$objDir\harvested.wxs" -out "$objDir\harvested.wixobj"
         if ($LASTEXITCODE -ne 0) { throw "candle.exe (harvested) failed (exit $LASTEXITCODE)" }
 
         Write-Host "==> light: linking MSI..."
-        & "$wixBin\light.exe" -ext WixUIExtension -out installer/PDFEditor-Setup-win-x64.msi -b ./publish/ -b ./installer/ installer/obj/base.wixobj installer/obj/harvested.wixobj
+        & "$wixBin\light.exe" -ext WixUIExtension -out "$installerDir\PDFEditor-Setup-win-x64.msi" -b "$publishDir" -b "$installerDir" "$objDir\base.wixobj" "$objDir\harvested.wixobj"
         if ($LASTEXITCODE -ne 0) { throw "light.exe failed (exit $LASTEXITCODE)" }
 
-        $msiSize = '{0:N1}' -f ((Get-Item 'installer/PDFEditor-Setup-win-x64.msi').Length / 1MB)
+        $msiSize = '{0:N1}' -f ((Get-Item "$installerDir\PDFEditor-Setup-win-x64.msi").Length / 1MB)
         Write-Host "MSI built successfully: PDFEditor-Setup-win-x64.msi ($msiSize MB)"
 
     - name: Upload MSI artifact
