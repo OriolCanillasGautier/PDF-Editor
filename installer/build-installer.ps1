@@ -44,7 +44,22 @@ if (-not $AppVersion) {
 
 Write-Host "Publishing to $publishDirFull"
 
-dotnet publish "$PSScriptRoot\..\src\PDFEditor.UI\PDFEditor.UI.csproj" -c $Configuration -r $Runtime --self-contained true -o "$publishDirFull"
+# Workaround: dotnet publish fails with spaces in path (MSBuild limitation on Windows).
+# Publish to temp directory first, then copy to final location.
+$tempPubDir = Join-Path $env:TEMP "pdf-editor-publish-$([System.IO.Path]::GetRandomFileName())"
+New-Item -ItemType Directory -Force -Path $tempPubDir | Out-Null
+
+try {
+  Write-Host "  (using temp: $tempPubDir)"
+  dotnet publish "$PSScriptRoot\..\src\PDFEditor.UI\PDFEditor.UI.csproj" -c $Configuration -r $Runtime --self-contained true -o "$tempPubDir"
+  
+  # Copy published files to final location
+  New-Item -ItemType Directory -Force -Path $publishDirFull | Out-Null
+  Copy-Item -Path "$tempPubDir\*" -Destination $publishDirFull -Recurse -Force
+  Write-Host "  Published to: $publishDirFull"
+} finally {
+  if (Test-Path $tempPubDir) { Remove-Item $tempPubDir -Recurse -Force }
+}
 
 # ─── Build & bundle pdf2docx-cli sidecar ─────────────────────────────────────
 $sidecarExe = Join-Path $publishDirFull "pdf2docx-cli.exe"
