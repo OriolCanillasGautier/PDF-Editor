@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.4 - CI & Installer Hotfix] - 2026-02-19
+
+### Fixed
+- **MSI build failure (WiX)**: Resolved `candle.exe` CNDL0103 by passing absolute Windows paths to WiX tools and ensuring `heat`, `candle`, and `light` exit codes are checked. Installer build now fails fast on errors.
+- **CI pipeline reliability**: Added caching for pip and PyInstaller sidecar builds (keys based on `tools/pdf2docx-cli/main.py` hash + pinned pdf2docx version) to reduce build time and avoid repeated downloads.
+- **Accidental artifacts removed**: Removed accidentally committed PyInstaller build artifacts and machine-specific `.spec` (contained absolute paths). Updated `.gitignore` to exclude `tools/pdf2docx-cli/build/`, `tools/pdf2docx-cli/dist/`, and `*.spec`.
+- **Documentation**: Updated copilot-instructions.md to require README and version marker updates when bumping releases.
+
+### Changed
+- CI `publish` job: sidecar build steps separated, copy uses absolute paths; MSI build now resolves paths with `Resolve-Path`.
+
 ## [0.0.3 - PDF→DOCX High-Fidelity Export] - 2026-02-19
 
 ### Added
