@@ -1,7 +1,19 @@
 # Copilot Instructions for PDF Editor
 
-**Version:** 1.3  
-**Last Updated:** 2026-02-18
+**Version:** 1.4  
+**Last Updated:** 2026-02-19
+
+---
+
+## ⚠️ ABSOLUTE HARD RULES — READ FIRST
+
+> These rules override all other instructions and must never be violated.
+
+| # | Rule | Detail |
+|---|------|--------|
+| **H-1** | **NEVER perform git operations without explicit user permission** | This includes `git commit`, `git push`, `git tag`, `git merge`, `git rebase`, `gh pr create`, and any equivalent. If you think a commit or push would be helpful, **ask first**. Do not proceed automatically. |
+| **H-2** | **NEVER install packages globally without explicit user permission** | Use project-scoped installs only. |
+| **H-3** | **NEVER modify or delete files outside the workspace** | All edits are scoped to this repository. |
 
 ---
 
@@ -1038,6 +1050,7 @@ All code must support these production-grade features:
 
 When helping with this codebase, ALWAYS:
 
+0. **⚠️ NEVER perform git operations without explicit user permission** — no `git commit`, `git push`, `git tag`, `git merge`, `gh pr create`, or any equivalent. Ask first.
 1. **Check `PLAN.md` first** for architecture decisions, phase priorities, and current status
 2. **Review Active Issues** in `PLAN.md` to understand current blockers
 3. **Follow coding standards** for C# and ReactiveUI patterns
@@ -1060,6 +1073,7 @@ When helping with this codebase, ALWAYS:
 | 1.0 | 2026-02-17 | Initial version based on Aerodynamic Pressure Mapping template |
 | 1.1 | 2026-02-17 | Added testing examples (service, ViewModel, mocking, async commands); expanded troubleshooting section with 30+ issues across 6 categories |
 | 1.2 | 2026-02-18 | Added HybridDocxExportProvider, ribbon UI architecture, UXWing icon guidelines, SkiaSharp migration path, PDF optimization module, updated service table (20+ services), external resources section |
+| 1.4 | 2026-02-19 | Added ⚠️ ABSOLUTE HARD RULES section (no git without permission); added rule #0 to AI Assistant Checklist; updated Document History |
 | 1.3 | 2026-02-18 | Consolidated version; added complete ribbon tab definitions, format preservation comparison table, test structure with 282+ tests, production requirements, AI assistant checklist updates |
 
 ---

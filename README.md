@@ -95,23 +95,53 @@ A comprehensive, open-source PDF editor built with C# and Avalonia UI, integrati
 - **Image Processing**: Magick.NET
 - **OCR**: Tesseract.NET 5.2.0
 - **Office Export**: DocumentFormat.OpenXml 3.0.1
+- **DOCX Backend**: pdf2docx 0.5.9 (Python, optional – high-fidelity export)
 - **Logging**: NLog
-- **Testing**: xUnit + Moq (97 tests)
+- **Testing**: xUnit + Moq (470+ tests)
 
 ## System Requirements
 
-- **OS**: Windows 7+, Linux, macOS
+- **OS**: Windows 10+, Linux (Ubuntu 22.04+ recommended), macOS 12+
 - **.NET Runtime**: 6.0 or later
-- **RAM**: 2GB minimum (4GB recommended)
-- **Storage**: 500MB for installation + dependencies
+- **Python**: 3.8+ (optional — required only for high-fidelity PDF→DOCX export)
+- **RAM**: 2 GB minimum (4 GB recommended for large PDFs)
+- **Storage**: 500 MB for installation + dependencies
 
-## Installation
+## Quick Start
 
-### For Users (Coming Soon)
+### One-Command Setup
+
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/OriolCanillasGautier/PDF-Editor.git
+cd PDF-Editor
+.\install.ps1
 ```
-Download the latest installer from Releases
-Run the .msi file
-Follow the installation wizard
+
+**Linux / macOS (bash):**
+```bash
+git clone https://github.com/OriolCanillasGautier/PDF-Editor.git
+cd PDF-Editor
+chmod +x install.sh && ./install.sh
+```
+
+The install script will:
+1. Verify .NET 6+ and Python 3.8+ are present
+2. Restore all NuGet packages
+3. Build the solution (Release)
+4. Install **pdf2docx 0.5.9** from the pinned GitHub wheel (Python backend for high-fidelity DOCX export)
+5. Run the full test suite
+
+Skip individual steps if needed:
+```powershell
+.\install.ps1 -SkipTests         # skip the test run
+.\install.ps1 -SkipPdf2Docx     # skip Python/pdf2docx install
+.\install.ps1 -SkipBuild        # restore packages only
+```
+
+Then run the app:
+```powershell
+dotnet run --project src/PDFEditor.UI/PDFEditor.UI.csproj
 ```
 
 ### For Developers
@@ -121,33 +151,45 @@ Follow the installation wizard
 Before getting started, ensure you have the following installed:
 
 1. **[.NET SDK 6.0+](https://dotnet.microsoft.com/en-us/download)** — Required to build and run
-2. **[Visual Studio 2022 Community](https://visualstudio.microsoft.com/vs/community/)** (recommended) or **Visual Studio Code**
-3. **[Git](https://git-scm.com/)** — Version control
-4. **[WiX Toolset v3.x](https://wixtoolset.org/download/)** — For building the MSI installer (Windows only)
-5. **Optional**: [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) language data files for OCR testing
+2. **[Python 3.8+](https://www.python.org/downloads/)** — Optional, needed for high-fidelity PDF→DOCX export via pdf2docx
+3. **[Visual Studio 2022 Community](https://visualstudio.microsoft.com/vs/community/)** (recommended) or **Visual Studio Code**
+4. **[Git](https://git-scm.com/)** — Version control
+5. **[WiX Toolset v3.x](https://wixtoolset.org/download/)** — For building the MSI installer (Windows only)
 
-#### Step 1: Clone & Setup
+#### Step 1: Clone & Run the Install Script
 
-```bash
-# Clone the repository
+```powershell
+# Windows
 git clone https://github.com/OriolCanillasGautier/PDF-Editor.git
 cd PDF-Editor
-
-# Restore all NuGet dependencies
-dotnet restore
+.\install.ps1
+```
+```bash
+# Linux / macOS
+git clone https://github.com/OriolCanillasGautier/PDF-Editor.git
+cd PDF-Editor
+chmod +x install.sh && ./install.sh
 ```
 
-#### Step 2: Build the Project
+This does everything: NuGet restore, build, pdf2docx install, and test run in one shot.
+
+#### Step 2 (manual alternative): Restore & Build
 
 ```bash
-# Build in Release configuration (recommended)
+dotnet restore
 dotnet build --configuration Release
-
-# Or build in Debug for development
-dotnet build --configuration Debug
 ```
 
-#### Step 3: Run the Application
+#### Step 3 (manual alternative): Install pdf2docx
+
+```bash
+# Pinned 0.5.9 wheel — pure-Python, no compiler required
+pip install https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl
+```
+
+The app will automatically detect Python and use pdf2docx for DOCX export when available. If Python is not installed, it falls back to the built-in iText7-based exporter (good for most documents).
+
+#### Step 4: Run the Application
 
 **Option A: Use dotnet**
 ```bash
@@ -159,7 +201,7 @@ dotnet run --project src/PDFEditor.UI/PDFEditor.UI.csproj
 2. Set `PDFEditor.UI` as the startup project (right-click → Set as Startup Project)
 3. Press `F5` to debug or `Ctrl+F5` to run
 
-#### Step 4: Run Tests
+#### Step 5: Run Tests
 
 ```bash
 # Run all unit tests
@@ -175,7 +217,46 @@ dotnet test src/PDFEditor.Tests/PDFEditor.Tests.csproj
 dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
 ```
 
-#### Building the MSI Installer (Windows Only)
+## PDF→DOCX Export
+
+The DOCX exporter uses a **hybrid approach** with two backends:
+
+| Feature | iText7 (built-in) | pdf2docx 0.5.9 (Python) |
+|---------|------------------|--------------------------|
+| Requires Python | No | Yes (3.8+) |
+| Text & fonts | ✅ Good | ✅ Excellent |
+| Tables | ⚠️ Heuristic | ✅ Structure-aware |
+| Merged cells | ⚠️ Limited | ✅ Full support |
+| Complex layouts | ⚠️ May reflow | ✅ Better preservation |
+| License | AGPL v3 | AGPL v3 |
+
+Install pdf2docx (once) to unlock high-fidelity export:
+```bash
+pip install https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl
+```
+The app auto-detects Python and switches to pdf2docx automatically. No configuration needed.
+
+### No Python? Use the self-contained sidecar
+
+Build `pdf2docx-cli.exe` once — it bundles CPython + pdf2docx into a single ~80 MB executable. Copy it next to `PDFEditor.UI.exe` and high-fidelity export works with no Python installation on the client machine.
+
+```powershell
+# Windows — builds tools\pdf2docx-cli\dist\pdf2docx-cli.exe
+.\tools\pdf2docx-cli\build.ps1
+
+# Copy to app output
+Copy-Item .\tools\pdf2docx-cli\dist\pdf2docx-cli.exe .\artifacts\publish\
+```
+
+```bash
+# Linux / macOS — builds tools/pdf2docx-cli/dist/pdf2docx-cli
+chmod +x tools/pdf2docx-cli/build.sh && ./tools/pdf2docx-cli/build.sh
+cp tools/pdf2docx-cli/dist/pdf2docx-cli artifacts/publish/
+```
+
+The app checks for the sidecar automatically (sidecar → Python in PATH → iText7 fallback).
+
+## Building the MSI Installer (Windows Only)
 
 To create a Windows installer (.msi):
 

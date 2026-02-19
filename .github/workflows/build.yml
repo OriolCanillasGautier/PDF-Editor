@@ -35,12 +35,21 @@ jobs:
     - name: Build
       run: dotnet build --configuration Release --no-restore
 
-    - name: Install fonts and fontconfig (Linux)
+    - name: Install fonts and system libs (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        sudo apt-get update
-        sudo apt-get install -y fontconfig libfontconfig1 libgdiplus fonts-dejavu fonts-liberation
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          fontconfig libfontconfig1 libgdiplus \
+          fonts-dejavu-core fonts-dejavu-extra \
+          fonts-liberation fonts-freefont-ttf \
+          imagemagick
+        # Rebuild font cache so ImageMagick type.xml picks up new fonts
         fc-cache -fv
+        magick -list font | grep -i dejavu || echo "DejaVu not in Magick list, fallback fonts will be used"
+
+    - name: Install pdf2docx Python backend
+      run: pip install https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl
 
     - name: Test with coverage
       env:
@@ -48,6 +57,7 @@ jobs:
         FONTCONFIG_FILE: /etc/fonts/fonts.conf
       run: >
         dotnet test --configuration Release --no-build --verbosity normal
+        --blame-hang-timeout 120s
         /p:CollectCoverage=true
         /p:CoverletOutputFormat=cobertura
         /p:CoverletOutput=./coverage/
@@ -94,6 +104,35 @@ jobs:
         --self-contained true
         -p:PublishSingleFile=true
         --output ./publish
+
+    - name: Build and bundle pdf2docx-cli sidecar (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        pip install pyinstaller --quiet
+        pip install https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl --quiet
+        python -m PyInstaller --onefile --name pdf2docx-cli `
+          --distpath tools/pdf2docx-cli/dist `
+          --workpath tools/pdf2docx-cli/build `
+          --specpath tools/pdf2docx-cli `
+          --clean --noconfirm `
+          tools/pdf2docx-cli/main.py
+        Copy-Item tools/pdf2docx-cli/dist/pdf2docx-cli.exe ./publish/
+        Write-Host "Sidecar bundled: $('{0:N1}' -f ((Get-Item ./publish/pdf2docx-cli.exe).Length/1MB)) MB"
+
+    - name: Build and bundle pdf2docx-cli sidecar (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        pip install pyinstaller --quiet
+        pip install https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl --quiet
+        python3 -m PyInstaller --onefile --name pdf2docx-cli \
+          --distpath tools/pdf2docx-cli/dist \
+          --workpath tools/pdf2docx-cli/build \
+          --specpath tools/pdf2docx-cli \
+          --clean --noconfirm \
+          tools/pdf2docx-cli/main.py
+        cp tools/pdf2docx-cli/dist/pdf2docx-cli ./publish/
+        echo "Sidecar bundled: $(du -sh ./publish/pdf2docx-cli | cut -f1)"
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4

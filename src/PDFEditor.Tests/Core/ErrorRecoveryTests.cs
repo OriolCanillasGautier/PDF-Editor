@@ -88,7 +88,7 @@ public class ErrorRecoveryTests
     {
         var optimizer = new PDFEditor.Core.Services.PdfOptimizer();
         Assert.Throws<ArgumentException>(() =>
-            optimizer.Optimize([], new PDFEditor.Core.Services.PdfOptimizationOptions()));
+            optimizer.Optimize(Array.Empty<byte>(), new PDFEditor.Core.Services.PdfOptimizationOptions()));
     }
 
     // ── IRedactionService edge cases ──────────────────────────────────────────

@@ -30,4 +30,11 @@
     <ProjectReference Include="..\PDFEditor.ClawPDFIntegration\PDFEditor.ClawPDFIntegration.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Copy xunit config to output so runner picks up parallelism settings -->
+    <None Update="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

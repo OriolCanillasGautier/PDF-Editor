@@ -40,7 +40,7 @@ public class PdfOptimizerTests
     public void Optimize_EmptyInputThrows()
     {
         var optimizer = new PdfOptimizer();
-        Assert.Throws<ArgumentException>(() => optimizer.Optimize([], new PdfOptimizationOptions()));
+        Assert.Throws<ArgumentException>(() => optimizer.Optimize(Array.Empty<byte>(), new PdfOptimizationOptions()));
     }
 
     [Fact]

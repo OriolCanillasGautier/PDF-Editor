@@ -14,7 +14,7 @@ public class PluginManager
 
     private readonly string _pluginDirectory;
     private readonly IPluginContext _context;
-    private readonly List<IPlugin> _loaded = [];
+    private readonly List<IPlugin> _loaded = new();
 
     public IReadOnlyList<IPlugin> Loaded => _loaded.AsReadOnly();
 

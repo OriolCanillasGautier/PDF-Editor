@@ -41,7 +41,7 @@ public class ClawPDFIntegrationTests
     {
         var wrapper = new ClawPDFWrapper();
         Assert.Throws<ArgumentException>(() =>
-            wrapper.MergeDocuments([], @"C:\Temp\merged.pdf"));
+            wrapper.MergeDocuments(Array.Empty<string>(), @"C:\Temp\merged.pdf"));
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public class ClawPDFIntegrationTests
     {
         var wrapper = new ClawPDFWrapper();
         Assert.Throws<FileNotFoundException>(() =>
-            wrapper.MergeDocuments(["missing1.pdf", "missing2.pdf"], @"C:\Temp\out.pdf"));
+            wrapper.MergeDocuments(new[] { "missing1.pdf", "missing2.pdf" }, @"C:\Temp\out.pdf"));
     }
 
     /// <summary>

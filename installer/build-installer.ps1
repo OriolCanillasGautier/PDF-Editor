@@ -7,7 +7,15 @@ param(
   [string]$AppVersion = ""
 )
 
-$wixExe = (Get-Command wix -ErrorAction SilentlyContinue).Source
+# Get-Command can return aliases/functions that lack a .Source property.
+# Only use .Source when the resolved command is an actual executable.
+function Resolve-ExeCommand([string]$Name) {
+  $cmd = Get-Command $Name -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.CommandType -eq 'Application') { return $cmd.Source }
+  return $null
+}
+
+$wixExe = Resolve-ExeCommand 'wix'
 if (-not $wixExe) {
   $candidatePaths = @(
     "$env:ProgramFiles\WiX Toolset v4.0\bin\wix.exe",
@@ -38,6 +46,38 @@ Write-Host "Publishing to $publishDirFull"
 
 dotnet publish "$PSScriptRoot\..\src\PDFEditor.UI\PDFEditor.UI.csproj" -c $Configuration -r $Runtime --self-contained true -o $publishDirFull
 
+# ─── Build & bundle pdf2docx-cli sidecar ─────────────────────────────────────
+$sidecarExe = Join-Path $publishDirFull "pdf2docx-cli.exe"
+if (-not (Test-Path $sidecarExe)) {
+  Write-Host "`n==> Building pdf2docx-cli sidecar..."
+  $toolDir = "$PSScriptRoot\..\tools\pdf2docx-cli"
+  $distExe = "$toolDir\dist\pdf2docx-cli.exe"
+
+  # Prefer a pre-built exe (dev workflow: run build.ps1 once, reuse it)
+  if (-not (Test-Path $distExe)) {
+    $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source `
+          ?? (Get-Command python  -ErrorAction SilentlyContinue).Source
+    if ($py) {
+      & $py -m pip install pyinstaller --quiet
+      & $py -m pip install "$PSScriptRoot\..\tools\pdf2docx-cli\.." --quiet 2>$null  # no-op if already installed
+      & $py -m pip install 'https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl' --quiet
+      & $py -m PyInstaller --onefile --name pdf2docx-cli `
+            --distpath "$toolDir\dist" --workpath "$toolDir\build" `
+            --specpath "$toolDir" --clean --noconfirm "$toolDir\main.py"
+    } else {
+      Write-Warning "Python not found; skipping sidecar build. DOCX export will use the iText7 fallback."
+    }
+  }
+
+  if (Test-Path $distExe) {
+    Copy-Item $distExe $publishDirFull
+    $sizeMb = [math]::Round((Get-Item $sidecarExe).Length / 1MB, 1)
+    Write-Host "  Sidecar bundled: pdf2docx-cli.exe ($sizeMb MB)"
+  }
+} else {
+  Write-Host "  Sidecar already present in publish dir, skipping rebuild."
+}
+
 $msiPath = "$PSScriptRoot\PDFEditor-$Configuration-$Runtime.msi"
 
 if ($wixExe) {
@@ -46,9 +86,9 @@ if ($wixExe) {
   exit 0
 }
 
-$candleExe = (Get-Command candle -ErrorAction SilentlyContinue).Source
-$lightExe = (Get-Command light -ErrorAction SilentlyContinue).Source
-$heatExe = (Get-Command heat -ErrorAction SilentlyContinue).Source
+$candleExe = Resolve-ExeCommand 'candle'
+$lightExe  = Resolve-ExeCommand 'light'
+$heatExe   = Resolve-ExeCommand 'heat'
 
 if (-not ($candleExe -and $lightExe -and $heatExe)) {
   $wixV3Dirs = @(
