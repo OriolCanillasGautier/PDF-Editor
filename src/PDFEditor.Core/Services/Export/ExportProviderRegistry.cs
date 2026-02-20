@@ -57,6 +57,7 @@ public class ExportProviderRegistry
         registry.Register(new TextExportProvider());
         registry.Register(new HtmlExportProvider());
         registry.Register(new DocxExportProvider());
+        registry.Register(new NativeDocxExportProvider());
         registry.Register(new XlsxExportProvider());
         registry.Register(new RtfExportProvider());
         registry.Register(new MarkdownExportProvider());

@@ -910,7 +910,7 @@ public partial class MainWindow : Window
                 if (!string.IsNullOrEmpty(path))
                 {
                     Tab.StatusText = "Exporting to DOCX...";
-                    var provider = new PDFEditor.Core.Services.Export.DocxExportProvider();
+                    var provider = new PDFEditor.Core.Services.Export.NativeDocxExportProvider();
                     var options = new PDFEditor.Core.Abstractions.ExportOptions
                     {
                         BaseFileName = IOPath.GetFileNameWithoutExtension(Tab.FilePath ?? "document"),

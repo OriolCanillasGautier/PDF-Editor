@@ -149,7 +149,7 @@ public class OdpOdsExportTests
     {
         var registry = ExportProviderRegistry.CreateDefault();
 
-        Assert.Equal(15, registry.Providers.Count);
+        Assert.Equal(16, registry.Providers.Count);
     }
 
     [Fact]

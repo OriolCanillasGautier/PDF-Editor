@@ -216,9 +216,9 @@ public class NewExportProviderTests
     [Fact]
     public void ExportRegistry_CreateDefault_Contains8Providers()
     {
-        // Registry now has 15 built-in providers: Image, Text, HTML, DOCX, XLSX, RTF, Markdown, CSV, JSON, PPTX, EPUB, LaTeX, ODT, ODP, ODS
+        // Registry now has 16 built-in providers
         var registry = ExportProviderRegistry.CreateDefault();
-        Assert.Equal(15, registry.Providers.Count);
+        Assert.Equal(16, registry.Providers.Count);
     }
 
     [Fact]

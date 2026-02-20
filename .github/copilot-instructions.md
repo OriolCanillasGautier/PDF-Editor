@@ -86,6 +86,12 @@ Update phase status in real-time in `PLAN.md`:
 - Completing a phase
 - Significant progress milestones
 
+### Rule 6: Terminal Commands
+
+**NEVER use `cat << EOF > file` or similar multi-line redirection commands in PowerShell.**
+These commands frequently fail with syntax errors in the Windows PowerShell environment.
+Instead, ALWAYS use the appropriate file editing tools (like `replace_string_in_file` or `create_file`) to modify or create files.
+
 ---
 
 ## Project Overview

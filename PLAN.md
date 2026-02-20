@@ -8,7 +8,6 @@ This document outlines the planned improvements and features for the PDF Editor 
 
 | Date | Phase/Step | Changes Made | Files Updated |
 |------|------------|--------------|---------------|
-| 2026-02-18 | CI/CD | Fix fontconfig test host crash: add libfontconfig1/libgdiplus, fc-cache, FONTCONFIG_PATH/FILE env vars | `.github/workflows/build.yml` |
 | 2026-02-18 | Analysis | Comprehensive gap analysis: identified 30 DI-registered services with no UI, 55 unchecked PLAN.md items, prioritized 28 implementation tasks | `PLAN.md` |
 | 2026-02-17 | Phase 1, Step 1 | Enhanced About dialog with GitHub link, version info, license, library credits | `MainWindow.axaml.cs` |
 | 2026-02-17 | Phase 1, Step 2 | Created IExportProvider interface, ExportResult, ExportOptions, ExportProgress | `Core/Abstractions/IExportProvider.cs` |
@@ -118,6 +117,8 @@ This document outlines the planned improvements and features for the PDF Editor 
 | 2026-02-18 | Version management | Created `Directory.Build.props` as single source of truth for app version (Version, AssemblyVersion, FileVersion, Company, Copyright). Updated both `.wxs` files to read `$(var.AppVersion)` from candle variable. Added `AllowSameVersionUpgrades="yes"` + `Schedule="afterInstallInitialize"` to `<MajorUpgrade>` so upgrades properly replace the old installation. Updated `build-installer.ps1` to auto-extract version from `Directory.Build.props` and pass `-dAppVersion` to WiX. | `Directory.Build.props`, `installer/PDFEditor.Installer.v3.wxs`, `installer/PDFEditor.Installer.wxs`, `installer/build-installer.ps1` |
 | 2026-02-18 | CI/CD - Remove ZIP | Removed portable ZIP creation steps from `build.yml` (GitHub auto-provides source archives on releases). Removed ZIP artifact uploads and ZIP entries in release assets. MSI build step now extracts version from git tag or `Directory.Build.props` and passes it to candle/light with correct per-step `shell: pwsh`. Only MSI is attached to GitHub Release. | `.github/workflows/build.yml` |
 | 2026-02-18 | Documentation & URL fixes | Updated README.md with comprehensive developer section (prerequisites, clone/setup, build, run, tests, MSI build, GitHub release workflow, version management, troubleshooting). Removed redundant "Quick Start for Developers" section. Replaced all `ocanillas` URLs with `OriolCanillasGautier` across 6 files. Fixed SETUP.md generic path example. Verified `.gitignore` correctly ignores `installer/obj/` and `*.msi`. | `README.md`, `SETUP.md`, `CONTRIBUTING.md`, `docs/index.md`, `.github/copilot-instructions.md`, `.gitignore` |
+| 2026-02-19 | Native DOCX layout engine | Implemented pure C# layout reconstruction engine to replace Python pdf2docx dependency. Created geometry models (PdfRect, LayoutCharacter, LayoutLine, LayoutBlock, PdfLine, LayoutTableCell, TableRegion), iText7 character-level + vector path extraction (LayoutExtractor), spatial clustering algorithms (LayoutAnalyzer: char→line→block, heading classification), table detection via H/V line intersections (TableDetectionEngine), and NativeDocxExportProvider with precise indentation/spacing from PDF coordinates. Registered in ExportProviderRegistry. 20 unit tests (all passing). | `Core/Models/Layout/*.cs` (7 files), `Core/Services/Export/LayoutExtractor.cs`, `Core/Services/Export/LayoutAnalyzer.cs`, `Core/Services/Export/TableDetectionEngine.cs`, `Core/Services/Export/NativeDocxExportProvider.cs`, `Core/Services/Export/ExportProviderRegistry.cs`, `Tests/Core/LayoutReconstructionTests.cs` |
+| 2026-02-19 | Documentation | Updated `PLAN.md` to include Phase 17 for DOCX Fidelity Improvements (headers/footers, typography). Updated `.github/copilot-instructions.md` to explicitly forbid the use of `cat << EOF` in PowerShell terminals. | `PLAN.md`, `.github/copilot-instructions.md` |
 
 ---
 
@@ -140,6 +141,8 @@ This document outlines the planned improvements and features for the PDF Editor 
 | Phase 13: CLI Tool | ✅ Complete | 2026-02-19 | 2026-02-19 | 100% |
 | Phase 14: CI/CD & Distribution | ✅ Complete | 2026-02-19 | 2026-02-19 | 100% |
 | Phase 15: DocFX Documentation | ✅ Complete | 2026-02-19 | 2026-02-19 | 100% |
+| Phase 16: Native DOCX Layout Engine | ✅ Complete | 2026-02-19 | 2026-02-19 | 100% |
+| Phase 17: DOCX Fidelity Improvements | Planned | - | - | 0% |
 
 ---
 
@@ -164,6 +167,7 @@ This document outlines the planned improvements and features for the PDF Editor 
 | 2026-02-17 | Shoelace formula for area measurement | Standard computational geometry, no external dependency | Library-based (overkill for simple polygon area) |
 | 2026-02-17 | Magick.NET CompositeOperator.Difference for visual diff | Pixel-accurate comparison, already in project dependencies | Custom pixel loop (slower), external diff tool (extra dependency) |
 | 2026-02-17 | Rule-based FormValidationService | Extensible, serializable, supports custom validators | Annotation-based validation (less flexible), schema-based (over-engineered) |
+| 2026-02-19 | Pure C# layout reconstruction for DOCX export | Eliminates Python pdf2docx sidecar dependency; character-level extraction + spatial clustering + intersection-based table detection produces high-fidelity DOCX natively | Keep Python pdf2docx (cross-platform complexity, AGPL dependency), Use only chunk-level text extraction (lower fidelity), Use DocumentFormat.OpenXml SDK (hand-crafted XML avoids repair dialogs) |
 
 ---
 
@@ -176,6 +180,16 @@ This document outlines the planned improvements and features for the PDF Editor 
 | ERR-003 | P3 | Tesseract OCR requires tessdata files installed separately | Users must download .traineddata files manually | Open | - |
 | ERR-004 | ~~P1~~ | ~~DOCX export: Word error opening file~~ | ~~DOCX files unreadable in MS Word~~ | **✅ RESOLVED** — Complete rewrite using raw System.IO.Compression + hand-crafted XML; 16/16 DOCX tests pass, files open in MS Word | - |
 | ERR-005 | ~~P2~~ | ~~Test host crash: AccessViolationException in Docnet.Core~~ | ~~Test suite aborted, full results not obtainable~~ | **✅ RESOLVED** — PdfiumLock serialization added to PdfRenderService; 372+ tests pass | - |
+| ERR-006 | P2 | DOCX export lacks headers/footers and advanced typography | Exported DOCX files do not preserve headers, footers, and precise typography/formatting | Open | - |
+
+---
+
+## Planned Improvements
+
+### Phase 17: DOCX Fidelity Improvements
+- **Header/Footer Detection:** Implement heuristics to detect repeating elements at the top and bottom of pages and map them to DOCX headers and footers.
+- **Advanced Typography:** Improve font matching, exact positioning, line spacing, and paragraph formatting to better match the original PDF.
+- **Format Details:** Enhance support for complex layouts, multi-column text, and precise image positioning.
 
 ---
 

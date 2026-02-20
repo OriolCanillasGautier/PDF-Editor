@@ -104,21 +104,48 @@ The export system uses a provider-based architecture for extensibility:
 
 ```
 IExportProvider (interface)
-├── ImageExportProvider    → PNG, JPEG, TIFF, BMP, WebP
-├── TextExportProvider     → TXT
-├── HtmlExportProvider     → HTML (visual with base64 images)
-├── DocxExportProvider     → DOCX (Microsoft Word, SDK-free)
-├── XlsxExportProvider     → XLSX (Excel with table detection)
-├── RtfExportProvider      → RTF (Rich Text Format)
-├── MarkdownExportProvider → MD (GitHub-compatible Markdown)
-├── CsvExportProvider      → CSV (RFC-4180 table extraction)
-├── JsonExportProvider     → JSON (structured text blocks)
-├── PptxExportProvider     → PPTX (PowerPoint with page images)
-├── EpubExportProvider     → EPUB 3.0 (e-book with TOC)
-├── LatexExportProvider    → TEX (LaTeX with heading/formatting)
-├── OdtExportProvider      → ODT (OpenDocument Text)
-├── OdpExportProvider      → ODP (OpenDocument Presentation)
-└── OdsExportProvider      → ODS (OpenDocument Spreadsheet)
+├── ImageExportProvider         → PNG, JPEG, TIFF, BMP, WebP
+├── TextExportProvider          → TXT
+├── HtmlExportProvider          → HTML (visual with base64 images)
+├── DocxExportProvider          → DOCX (Microsoft Word, SDK-free)
+├── NativeDocxExportProvider    → DOCX (layout reconstruction engine)
+├── XlsxExportProvider          → XLSX (Excel with table detection)
+├── RtfExportProvider           → RTF (Rich Text Format)
+├── MarkdownExportProvider      → MD (GitHub-compatible Markdown)
+├── CsvExportProvider           → CSV (RFC-4180 table extraction)
+├── JsonExportProvider          → JSON (structured text blocks)
+├── PptxExportProvider          → PPTX (PowerPoint with page images)
+├── EpubExportProvider          → EPUB 3.0 (e-book with TOC)
+├── LatexExportProvider         → TEX (LaTeX with heading/formatting)
+├── OdtExportProvider           → ODT (OpenDocument Text)
+├── OdpExportProvider           → ODP (OpenDocument Presentation)
+└── OdsExportProvider           → ODS (OpenDocument Spreadsheet)
+```
+
+### Layout Reconstruction Engine (NativeDocxExportProvider)
+
+The Native DOCX export uses a 3-phase layout reconstruction pipeline
+that eliminates the Python pdf2docx dependency:
+
+```
+Phase 1: LayoutExtractor (iText7 IEventListener)
+├── CharacterExtractionListener  → individual glyph X,Y,W,H + font metadata
+├── PathExtractionListener       → horizontal/vertical lines from vector paths
+└── ImageExtractionListener      → embedded image bytes + CTM positioning
+
+Phase 2: LayoutAnalyzer (spatial clustering algorithms)
+├── Character → Line clustering  → baseline proximity (ΔY < 0.5 × fontSize)
+├── Word break detection         → inter-char gap > 0.3 × fontSize → space
+├── Line → Block clustering      → vertical gap > 1.8 × fontSize → new paragraph
+├── Heading classification       → font size ratio to median body size
+└── TableDetectionEngine         → H/V line intersections → grid → cell mapping
+
+Phase 3: NativeDocxExportProvider (OOXML generation)
+├── PDF points → Word twips (×20) / half-points (×2) / EMUs (×12700)
+├── X position → left indentation
+├── Y gap → SpaceBefore spacing
+├── Font subsetting prefix removal (ABCDEF+Font → Font)
+└── Hand-crafted XML in ZipArchive (no DocumentFormat.OpenXml SDK)
 ```
 
 **Adding a new export format:**
