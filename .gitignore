@@ -217,6 +217,11 @@ publish/
 dist/
 *.ncrunchproject
 
+# PyInstaller sidecar build artifacts (auto-generated; contain absolute paths)
+tools/pdf2docx-cli/build/
+tools/pdf2docx-cli/dist/
+tools/pdf2docx-cli/*.spec
+
 # Installer build artifacts (keep source files, ignore outputs)´
 installer/obj/
 installer/*.msi

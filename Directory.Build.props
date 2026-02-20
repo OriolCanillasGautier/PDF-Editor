@@ -9,10 +9,18 @@
     ╚══════════════════════════════════════════════════════════════╝
   -->
   <PropertyGroup>
-    <Version>0.0.2</Version>
+    <Version>0.0.3</Version>
     <AssemblyVersion>$(Version)</AssemblyVersion>
     <FileVersion>$(Version)</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
+
+    <!--
+      Allow C# 12 syntax (collection expressions, primary constructors, etc.) across
+      all projects even though we target net6.0. The runtime is net6.0; the *language*
+      version is independent and defaults to the SDK's supported maximum when set to
+      'latest'.  Projects that already declare <LangVersion> will override this.
+    -->
+    <LangVersion>latest</LangVersion>
 
     <!-- Company / product metadata embedded in every assembly -->
     <Company>PDF-Editor</Company>

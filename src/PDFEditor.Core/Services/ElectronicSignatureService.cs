@@ -48,15 +48,36 @@ public class ElectronicSignatureService
         int approxWidth = Math.Max(200, name.Length * (fontSize * 2 / 3) + 40);
         int height = fontSize + 30;
 
-        // Create a white image and render text by writing each char as pixels
-        // Since the Drawables API is not available, use MagickImage.Annotate or simple rendering
         using var image = new MagickImage(MagickColors.White, (uint)approxWidth, (uint)height);
         image.Settings.FontPointsize = fontSize;
-        image.Settings.Font = fontFamily;
         image.Settings.FillColor = new MagickColor(0, 0, 24576, ushort.MaxValue); // dark blue (Q16)
         image.Settings.BackgroundColor = MagickColors.Transparent;
 
-        image.Annotate(name, Gravity.West);
+        // Try fonts in preference order; fall back to empty string (ImageMagick built-in)
+        // so this works on Linux CI runners where specific named fonts may be absent.
+        string[] fontsToTry = { fontFamily, "DejaVu-Sans", "Liberation-Sans", "FreeSans",
+                                 "Helvetica", "Arial", "sans-serif", "" };
+        bool annotated = false;
+        foreach (var font in fontsToTry)
+        {
+            try
+            {
+                image.Settings.Font = font;
+                image.Annotate(name, Gravity.West);
+                annotated = true;
+                break;
+            }
+            catch (MagickTypeErrorException ex)
+            {
+                Log.Debug(ex, "Font '{Font}' unavailable on this system, trying next fallback", font);
+            }
+        }
+
+        if (!annotated)
+            throw new InvalidOperationException(
+                "No usable font found for typed signature rendering. " +
+                "Install fonts-dejavu or another font package and ensure ImageMagick can locate them.");
+
         image.Trim();
 
         // Replace white background with transparent

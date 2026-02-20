@@ -15,12 +15,12 @@ public class ClawPDFWrapper
 
     private readonly string _clawPdfExePath;
 
-    private static readonly string[] DefaultSearchPaths =
-    [
+    private static readonly string[] DefaultSearchPaths = new[]
+    {
         @"C:\Program Files\clawPDF\clawPDF.exe",
         @"C:\Program Files (x86)\clawPDF\clawPDF.exe",
         Environment.ExpandEnvironmentVariables(@"%LocalAppData%\clawPDF\clawPDF.exe"),
-    ];
+    };
 
     /// <param name="clawPdfExePath">
     ///   Full path to clawPDF.exe. Defaults to auto-detection from well-known install locations.

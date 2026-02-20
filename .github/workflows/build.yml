@@ -35,12 +35,28 @@ jobs:
     - name: Build
       run: dotnet build --configuration Release --no-restore
 
-    - name: Install fonts and fontconfig (Linux)
+    - name: Install fonts and system libs (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        sudo apt-get update
-        sudo apt-get install -y fontconfig libfontconfig1 libgdiplus fonts-dejavu fonts-liberation
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          fontconfig libfontconfig1 libgdiplus \
+          fonts-dejavu-core fonts-dejavu-extra \
+          fonts-liberation fonts-freefont-ttf \
+          imagemagick
+        # Rebuild font cache so ImageMagick type.xml picks up new fonts
         fc-cache -fv
+        magick -list font | grep -i dejavu || echo "DejaVu not in Magick list, fallback fonts will be used"
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-pdf2docx-0.5.9
+        restore-keys: ${{ runner.os }}-pip-
+
+    - name: Install pdf2docx Python backend
+      run: pip install https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl
 
     - name: Test with coverage
       env:
@@ -48,6 +64,7 @@ jobs:
         FONTCONFIG_FILE: /etc/fonts/fonts.conf
       run: >
         dotnet test --configuration Release --no-build --verbosity normal
+        --blame-hang-timeout 120s
         /p:CollectCoverage=true
         /p:CoverletOutputFormat=cobertura
         /p:CoverletOutput=./coverage/
@@ -95,6 +112,59 @@ jobs:
         -p:PublishSingleFile=true
         --output ./publish
 
+    - name: Cache pip packages (publish)
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-sidecar-pdf2docx-0.5.9-pyinstaller
+        restore-keys: ${{ runner.os }}-pip-sidecar-
+
+    - name: Cache PyInstaller sidecar build
+      uses: actions/cache@v4
+      id: sidecar-cache
+      with:
+        path: tools/pdf2docx-cli/dist
+        key: ${{ runner.os }}-sidecar-${{ hashFiles('tools/pdf2docx-cli/main.py') }}-pdf2docx-0.5.9
+
+    - name: Build and bundle pdf2docx-cli sidecar (Windows)
+      if: matrix.os == 'windows-latest' && steps.sidecar-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        pip install pyinstaller --quiet
+        pip install https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl --quiet
+        python -m PyInstaller --onefile --name pdf2docx-cli `
+          --distpath tools/pdf2docx-cli/dist `
+          --workpath tools/pdf2docx-cli/build `
+          --specpath tools/pdf2docx-cli `
+          --clean --noconfirm `
+          tools/pdf2docx-cli/main.py
+        if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
+
+    - name: Build and bundle pdf2docx-cli sidecar (Linux)
+      if: matrix.os == 'ubuntu-latest' && steps.sidecar-cache.outputs.cache-hit != 'true'
+      run: |
+        pip install pyinstaller --quiet
+        pip install https://github.com/ArtifexSoftware/pdf2docx/releases/download/v0.5.9/pdf2docx-0.5.9-py3-none-any.whl --quiet
+        python3 -m PyInstaller --onefile --name pdf2docx-cli \
+          --distpath tools/pdf2docx-cli/dist \
+          --workpath tools/pdf2docx-cli/build \
+          --specpath tools/pdf2docx-cli \
+          --clean --noconfirm \
+          tools/pdf2docx-cli/main.py
+
+    - name: Copy sidecar to publish dir (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Copy-Item tools/pdf2docx-cli/dist/pdf2docx-cli.exe ./publish/
+        Write-Host "Sidecar bundled: $('{0:N1}' -f ((Get-Item ./publish/pdf2docx-cli.exe).Length/1MB)) MB"
+
+    - name: Copy sidecar to publish dir (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        cp tools/pdf2docx-cli/dist/pdf2docx-cli ./publish/
+        echo "Sidecar bundled: $(du -sh ./publish/pdf2docx-cli | cut -f1)"
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
@@ -114,6 +184,8 @@ jobs:
       if: matrix.os == 'windows-latest'
       shell: pwsh
       run: |
+        $ErrorActionPreference = 'Stop'
+
         # Extract version from tag (v1.2.3 → 1.2.3) or fall back to Directory.Build.props
         $ref = '${{ github.ref_name }}'
         if ($ref -match '^v?(\d+\.\d+\.\d+)') {
@@ -122,14 +194,47 @@ jobs:
           $appVersion = ([xml](Get-Content 'Directory.Build.props')).Project.PropertyGroup.Version
         }
         Write-Host "Building MSI version $appVersion"
-        choco install wixtoolset -y --no-progress
-        $wixBin = "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin"
+
+        # Find WiX — prefer pre-installed on the runner; fall back to choco
+        $wixBin = Get-ChildItem "${env:ProgramFiles(x86)}\WiX Toolset*" -ErrorAction SilentlyContinue |
+                  Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin" }
+        if (-not $wixBin -or -not (Test-Path "$wixBin\heat.exe")) {
+          Write-Host "WiX not found, installing via choco..."
+          choco install wixtoolset -y --no-progress
+          $wixBin = Get-ChildItem "${env:ProgramFiles(x86)}\WiX Toolset*" |
+                    Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin" }
+        }
+        if (-not $wixBin) { throw "WiX Toolset not found after install attempt" }
+        Write-Host "Using WiX from: $wixBin"
         $env:Path += ";$wixBin"
+
         New-Item -ItemType Directory -Force -Path installer/obj | Out-Null
-        & "$wixBin\heat.exe" dir ./publish/ -cg PublishedFiles -dr INSTALLFOLDER -gg -sreg -srd -sfrag -out installer/obj/harvested.wxs
-        & "$wixBin\candle.exe" installer/PDFEditor.Installer.v3.wxs -dPublishDir=./publish/ -dAppVersion=$appVersion -ext WixUIExtension -out installer/obj/base.wixobj
-        & "$wixBin\candle.exe" installer/obj/harvested.wxs -out installer/obj/harvested.wixobj
-        & "$wixBin\light.exe" -ext WixUIExtension -out installer/PDFEditor-Setup-win-x64.msi -b ./publish/ -b ./installer/ installer/obj/base.wixobj installer/obj/harvested.wixobj
+
+        # Resolve all paths to absolute Windows paths (WiX v3 chokes on relative/forward-slash paths)
+        $publishDir = (Resolve-Path '.\publish').Path
+        $installerDir = (Resolve-Path '.\installer').Path
+        $objDir = "$installerDir\obj"
+        Write-Host "Publish dir : $publishDir"
+        Write-Host "Installer dir: $installerDir"
+
+        Write-Host "==> heat: harvesting publish dir..."
+        & "$wixBin\heat.exe" dir "$publishDir" -cg PublishedFiles -dr INSTALLFOLDER -gg -sreg -srd -sfrag -out "$objDir\harvested.wxs"
+        if ($LASTEXITCODE -ne 0) { throw "heat.exe failed (exit $LASTEXITCODE)" }
+
+        Write-Host "==> candle: compiling base WXS..."
+        & "$wixBin\candle.exe" "$installerDir\PDFEditor.Installer.v3.wxs" "-dPublishDir=$publishDir" "-dAppVersion=$appVersion" -ext WixUIExtension -out "$objDir\base.wixobj"
+        if ($LASTEXITCODE -ne 0) { throw "candle.exe (base) failed (exit $LASTEXITCODE)" }
+
+        Write-Host "==> candle: compiling harvested WXS..."
+        & "$wixBin\candle.exe" "$objDir\harvested.wxs" -out "$objDir\harvested.wixobj"
+        if ($LASTEXITCODE -ne 0) { throw "candle.exe (harvested) failed (exit $LASTEXITCODE)" }
+
+        Write-Host "==> light: linking MSI..."
+        & "$wixBin\light.exe" -ext WixUIExtension -out "$installerDir\PDFEditor-Setup-win-x64.msi" -b "$publishDir" -b "$installerDir" "$objDir\base.wixobj" "$objDir\harvested.wixobj"
+        if ($LASTEXITCODE -ne 0) { throw "light.exe failed (exit $LASTEXITCODE)" }
+
+        $msiSize = '{0:N1}' -f ((Get-Item "$installerDir\PDFEditor-Setup-win-x64.msi").Length / 1MB)
+        Write-Host "MSI built successfully: PDFEditor-Setup-win-x64.msi ($msiSize MB)"
 
     - name: Upload MSI artifact
       if: matrix.os == 'windows-latest'
